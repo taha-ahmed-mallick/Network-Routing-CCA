@@ -1,16 +1,109 @@
+@import url('https://fonts.googleapis.com/css2?family=Roboto&display=swap');
+
 * {
     padding: 0px;
     margin: 0px;
     box-sizing: border-box;
+    font-family: Roboto, sans-serif;
+    transition: 50ms linear;
+    user-select: none;
 }
 
-html, body {
+html,
+body {
     height: 100%;
     width: 100%;
+    overflow: hidden;
+}
+
+body {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+}
+
+div#side-panel {
+    left: 0px;
+    position: absolute;
+    display: inline-block;
+    margin: 5px;
+    background: #0f172a;
+    border: 1px solid #27303d;
+    padding: 7px;
+    border-radius: 0.75rem;
+    /* height: 50vw; */
+    color: #ffffff;
+    font-size: 25px;
+    display: flex;
+    justify-content: space-around;
+    flex-direction: column;
+}
+
+div#side-panel span {
+    padding: 7px;
+    background-color: #1e293b;
+    border: 1px solid #343d4b;
+    margin: 5px 0px;
+    border-radius: 7px;
+    display: flex;
+    cursor: pointer;
+    transition: background-color 250ms linear, transform 150ms ease-out, color 50ms linear;
+}
+
+div#side-panel span:hover {
+    background-color: #263750;
+}
+
+div#side-panel span#delete:hover {
+    color: #f44336;
+}
+
+div#side-panel span#link:hover {
+    color: #8bc34a;
+}
+
+div#side-panel span:active {
+    transform: scale(0.85);
+}
+
+div#side-panel span.active {
+    background-color: #0284c7;
+    box-shadow: 0 0 8px 5px #005e8f;
+    border: none;
+}
+
+div#side-panel div.line {
+    width: 100%;
+    height: 1px;
+    background: #343d4b;
+}
+
+canvas#bg {
+    background: #0f172a;
 }
 
 canvas {
     display: block;
     position: absolute;
-    background: rebeccapurple;
+    background: #00000000;
+}
+
+span#help-btn {
+    position: absolute;
+    color: #ffffff;
+    font-size: 35px;
+    border: 3px solid #ffffff;
+    border-radius: 35px;
+    padding: 0px 13px;
+    right: 7px;
+    top: 7px;
+    cursor: pointer;
+}
+
+span#help-btn:hover {
+    transform: scale(1.05);
+}
+
+span#help-btn:active {
+    transform: scale(0.85);
 }
