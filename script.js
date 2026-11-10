@@ -3,6 +3,17 @@ const cvs = cvsArr[1];
 const cvsBg = cvsArr[0];
 const ctx = cvs.getContext("2d");
 const ctxBg = cvsBg.getContext("2d");
+const leftPanel = document.getElementById("side-panel");
+const sideBtns = document.querySelectorAll("div#side-panel span");
+let activeSideBtn = 0;
+
+for (let i = 0; i < 5; i++) {
+    sideBtns[i].addEventListener("click", () => {
+        sideBtns[activeSideBtn].classList.remove("active");
+        sideBtns[i].classList.add("active");
+        activeSideBtn = i;
+    });
+}
 
 class Dimensions {
     constructor() {
@@ -98,6 +109,8 @@ window.addEventListener('resize', () => { dimension.resize(); dots(); });
 cvs.addEventListener('mousedown', (eve) => { dimension.mouseDown = true; });
 
 cvs.addEventListener('mousemove', (eve) => {
+    if (eve.x < 15) { leftPanel.classList.add("active"); }
+    else {leftPanel.classList.remove("active");}
     if (dimension.mouseDown) {
         // Simple, predictable translation adjustment
         dimension.x += eve.movementX;

@@ -23,20 +23,23 @@ body {
 }
 
 div#side-panel {
-    left: 0px;
+    left: -67px;
     position: absolute;
-    display: inline-block;
     margin: 5px;
     background: #0f172a;
     border: 1px solid #27303d;
     padding: 7px;
     border-radius: 0.75rem;
-    /* height: 50vw; */
     color: #ffffff;
     font-size: 25px;
     display: flex;
     justify-content: space-around;
     flex-direction: column;
+    transition: left 250ms linear(0 0%, 0 1.8%, 0.01 3.6%, 0.03 6.35%, 0.07 9.1%, 0.13 11.4%, 0.19 13.4%, 0.27 15%, 0.34 16.1%, 0.54 18.35%, 0.66 20.6%, 0.72 22.4%, 0.77 24.6%, 0.81 27.3%, 0.85 30.4%, 0.88 35.1%, 0.92 40.6%, 0.94 47.2%, 0.96 55%, 0.98 64%, 0.99 74.4%, 1 86.4%, 1 100%);
+}
+
+div#side-panel.active, div#side-panel:hover {
+    left: 0px;
 }
 
 div#side-panel span {
@@ -69,7 +72,15 @@ div#side-panel span:active {
 div#side-panel span.active {
     background-color: #0284c7;
     box-shadow: 0 0 8px 5px #005e8f;
-    border: none;
+    border: 1px solid #0284c7;
+}
+
+div#side-panel span.active#link {
+    color: #8bc34a;
+}
+
+div#side-panel span.active#delete {
+    color: #f44336;
 }
 
 div#side-panel div.line {
