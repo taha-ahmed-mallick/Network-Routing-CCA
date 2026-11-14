@@ -6,9 +6,9 @@ const ctxBg = cvsBg.getContext("2d");
 const leftPanel = document.getElementById("side-panel");
 const sideBtns = document.querySelectorAll("div#side-panel>span");
 const lockImgs = document.querySelectorAll("div#side-panel>span#lock-unlock>span");
-let activeSideBtn = 1;
 let sideBarLocked = true;
 
+// lock-unlock button functionality
 sideBtns[0].addEventListener("click", () => {
     sideBarLocked = !sideBarLocked;
     if (sideBarLocked) {
@@ -22,11 +22,28 @@ sideBtns[0].addEventListener("click", () => {
     }
 });
 
+const TOOLS = {
+    MOUSE: 1,
+    CLIENT: 2,
+    ROUTER: 3,
+    LINK: 4,
+    DELETE: 5
+};
+let activeSideBtn = TOOLS.MOUSE;
+
+// main side panel buttons functionality
 for (let i = 1; i < 6; i++) {
     sideBtns[i].addEventListener("click", () => {
         sideBtns[activeSideBtn].classList.remove("active");
         sideBtns[i].classList.add("active");
         activeSideBtn = i;
+    });
+}
+
+// upload/save buttons functionality under construction 🚧
+for (let i = 6; i < sideBtns.length; i++) {
+    sideBtns[i].addEventListener("click", () => {
+        sideBtns[i].classList.toggle("active");
     });
 }
 
