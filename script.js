@@ -4,10 +4,25 @@ const cvsBg = cvsArr[0];
 const ctx = cvs.getContext("2d");
 const ctxBg = cvsBg.getContext("2d");
 const leftPanel = document.getElementById("side-panel");
-const sideBtns = document.querySelectorAll("div#side-panel span");
-let activeSideBtn = 0;
+const sideBtns = document.querySelectorAll("div#side-panel>span");
+const lockImgs = document.querySelectorAll("div#side-panel>span#lock-unlock>span");
+let activeSideBtn = 1;
+let sideBarLocked = true;
 
-for (let i = 0; i < 5; i++) {
+sideBtns[0].addEventListener("click", () => {
+    sideBarLocked = !sideBarLocked;
+    if (sideBarLocked) {
+        leftPanel.classList.add("active");
+        lockImgs[0].classList.remove("hide");
+        lockImgs[1].classList.add("hide");
+    } else {
+        leftPanel.classList.remove("active");
+        lockImgs[0].classList.add("hide");
+        lockImgs[1].classList.remove("hide");
+    }
+});
+
+for (let i = 1; i < 6; i++) {
     sideBtns[i].addEventListener("click", () => {
         sideBtns[activeSideBtn].classList.remove("active");
         sideBtns[i].classList.add("active");
@@ -32,6 +47,14 @@ class Dimensions {
         this.width = window.innerWidth;
         cvsBg.width = cvs.width = this.width;
         cvsBg.height = cvs.height = this.height;
+    }
+
+    // Convert screen (mouse) coordinates to world (canvas) coordinates
+    screenToWorld(screenX, screenY) {
+        return {
+            x: (screenX - this.x) / this.zoom,
+            y: (screenY - this.y) / this.zoom
+        };
     }
 };
 let dimension = new Dimensions();
@@ -109,8 +132,10 @@ window.addEventListener('resize', () => { dimension.resize(); dots(); });
 cvs.addEventListener('mousedown', (eve) => { dimension.mouseDown = true; });
 
 cvs.addEventListener('mousemove', (eve) => {
-    if (eve.x < 15) { leftPanel.classList.add("active"); }
-    else {leftPanel.classList.remove("active");}
+    if (!sideBarLocked) {
+        if (eve.x < 15) { leftPanel.classList.add("active"); }
+        else { leftPanel.classList.remove("active"); }
+    }
     if (dimension.mouseDown) {
         // Simple, predictable translation adjustment
         dimension.x += eve.movementX;
