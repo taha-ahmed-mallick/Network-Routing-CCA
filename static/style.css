@@ -355,3 +355,30 @@ span#help-btn:hover {
 span#help-btn:active {
     transform: scale(0.85);
 }
+
+/* 1. Overall scrollbar width/height */
+*::-webkit-scrollbar {
+    width: 5px;
+    /* Vertical scrollbar width */
+    height: 10px;
+    /* Horizontal scrollbar height */
+}
+
+/* 2. Background track */
+*::-webkit-scrollbar-track {
+    background: #1e293b;
+    border-radius: 8px;
+    box-sizing: content-box;
+}
+
+/* 3. Draggable handle (thumb) */
+*::-webkit-scrollbar-thumb {
+    background-color: #0093dd;
+    border-radius: 8px;
+    transition: background-color 150ms linear;
+}
+
+/* 4. Hover effect on thumb */
+*::-webkit-scrollbar-thumb:hover {
+    background-color: #006699;
+}
