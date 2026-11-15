@@ -674,6 +674,14 @@ cvs.addEventListener("contextmenu", (eve) => {
     if (hitNode) {
         interaction.selectedNode = hitNode;
         interaction.selectedEdge = null;
+        if (dimension.width - (hitNode.x * dimension.zoom + dimension.x) <= 370) {
+            const int = setInterval(() => {
+                dimension.x -= 7;
+                if (dimension.width - (hitNode.x * dimension.zoom + dimension.x) >= 420) {
+                    clearInterval(int);
+                }
+            }, 1);
+        }
         inspector.openNode(hitNode);
     } else if (hitEdge) {
         interaction.selectedEdge = hitEdge;
