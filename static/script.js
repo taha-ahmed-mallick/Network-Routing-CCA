@@ -604,13 +604,15 @@ inspector.init();
 // 4. GEOMETRY HIT-TESTING HELPERS
 // ==========================================
 function getNodeAt(wx, wy) {
+    let discrepancy = 0;
     for (let i = network.nodes.length - 1; i >= 0; i--) {
         const n = network.nodes[i];
+        if (n.type === "router") { discrepancy = 10; }
         if (
             wx >= n.x - CONFIG.HALF_NODE &&
             wx <= n.x + CONFIG.HALF_NODE &&
-            wy >= n.y - CONFIG.HALF_NODE &&
-            wy <= n.y + CONFIG.HALF_NODE
+            wy >= n.y - CONFIG.HALF_NODE - discrepancy &&
+            wy <= n.y + CONFIG.HALF_NODE - discrepancy
         ) {
             return n;
         }
