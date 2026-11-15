@@ -42,11 +42,51 @@ for (let i = 1; i < 6; i++) {
 }
 
 // Upload/save buttons functionality under construction
-for (let i = 6; i < sideBtns.length; i++) {
-    sideBtns[i].addEventListener("click", () => {
-        sideBtns[i].classList.toggle("active");
-    });
-}
+const fileInput = document.getElementById("config-file-input");
+
+// Upload button (sideBtns[6])
+sideBtns[6].addEventListener("click", () => {
+    if (network.isDirty && network.nodes.length > 0) {
+        const proceed = confirm(
+            "You have unsaved changes since your last download. Uploading will overwrite your current configuration. Continue?"
+        );
+        if (!proceed) return;
+    }
+    fileInput.value = ""; // Allows re-uploading the same file if modified
+    fileInput.click();
+});
+
+fileInput.addEventListener("change", (eve) => {
+    const file = eve.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+        try {
+            const parsed = JSON.parse(event.target.result);
+            network.importConfig(parsed);
+        } catch (err) {
+            alert("Failed to load config: " + err.message);
+        }
+    };
+    reader.readAsText(file);
+});
+
+// Download / Save button (sideBtns[7])
+sideBtns[7].addEventListener("click", () => {
+    const jsonStr = JSON.stringify(network.exportConfig(), null, 2);
+    const blob = new Blob([jsonStr], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `network-topology-${Date.now()}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url); // Free memory immediately
+    network.isDirty = false; // Reset dirty flag after download
+});
 
 class Dimensions {
     constructor() {
@@ -140,6 +180,11 @@ const network = {
     edges: [],
     counters: { client: 1, router: 1, edge: 1 },
     spare: { client: [], router: [], edge: [] },
+    isDirty: false, // Tracks if the network has unsaved changes
+
+    markDirty() {
+        this.isDirty = true;
+    },
 
     addClient(x, y) {
         let id = this.counters.client;
@@ -148,6 +193,7 @@ const network = {
         } else { this.counters.client++; }
         const node = new Client(`C${id}`, x, y);
         this.nodes.push(node);
+        this.markDirty();
         return node;
     },
 
@@ -158,6 +204,7 @@ const network = {
         } else { this.counters.router++; }
         const node = new Router(`R${id}`, x, y);
         this.nodes.push(node);
+        this.markDirty();
         return node;
     },
 
@@ -175,6 +222,7 @@ const network = {
         nodeA.edges.push(edge);
         nodeB.edges.push(edge);
         this.edges.push(edge);
+        this.markDirty();
         return edge;
     },
 
@@ -184,6 +232,7 @@ const network = {
         edge.nodeA.edges = edge.nodeA.edges.filter(e => e !== edge);
         edge.nodeB.edges = edge.nodeB.edges.filter(e => e !== edge);
         this.edges = this.edges.filter(e => e !== edge);
+        this.markDirty();
     },
 
     removeNode(node) {
@@ -195,6 +244,7 @@ const network = {
         // Remove all incident edges first
         [...node.edges].forEach(edge => this.removeEdge(edge));
         this.nodes = this.nodes.filter(n => n !== node);
+        this.markDirty();
     },
 
     // Generates the stripped-down JSON payload for the C++ Crow backend
@@ -224,6 +274,115 @@ const network = {
             nodes: validNodes.map(n => ({ id: n.id, type: n.type })),
             edges: validEdges
         };
+    },
+
+    // ==========================================
+    // Import/Export Network Configuration for JSON Save/Load
+    // ==========================================
+    exportConfig() {
+        return {
+            version: 1,
+            camera: {
+                x: dimension.x,
+                y: dimension.y,
+                zoom: dimension.zoom
+            },
+            nodes: this.nodes.map(n => ({
+                id: n.id,
+                type: n.type,
+                x: n.x,
+                y: n.y,
+                label: n.label,
+                broken: n.broken
+            })),
+            edges: this.edges.map(e => ({
+                id: e.id,
+                from: e.nodeA.id,
+                to: e.nodeB.id,
+                weight: e.weight,
+                broken: e.broken
+            }))
+        };
+    },
+
+    importConfig(data) {
+        if (!data || !Array.isArray(data.nodes) || !Array.isArray(data.edges)) {
+            throw new Error("Invalid network configuration format.");
+        }
+
+        // 1. Reset current state & close any open inspector
+        inspector.close();
+        interaction.linkStartNode = null;
+        interaction.draggedNode = null;
+        this.nodes = [];
+        this.edges = [];
+        this.counters = { client: 1, router: 1, edge: 1 };
+        this.spare = { client: [], router: [], edge: [] };
+
+        // 2. Restore camera if present
+        if (data.camera && typeof data.camera.x === "number") {
+            dimension.x = data.camera.x;
+            dimension.y = data.camera.y;
+            dimension.zoom = Math.min(Math.max(data.camera.zoom || 1, 0.3), 3);
+            dots();
+        }
+
+        // Track used numeric IDs to rebuild counters & spare stacks cleanly
+        const usedIds = { client: new Set(), router: new Set(), edge: new Set() };
+        const nodeMap = new Map(); // O(1) lookup: id -> Client/Router instance
+
+        // 3. Reconstruct Nodes
+        for (const rawNode of data.nodes) {
+            if (!rawNode.id || (rawNode.type !== "client" && rawNode.type !== "router")) continue;
+            const numId = parseInt(rawNode.id.slice(1), 10);
+            if (isNaN(numId) || numId < 1) continue;
+
+            const node = rawNode.type === "client"
+                ? new Client(rawNode.id, Number(rawNode.x) || 0, Number(rawNode.y) || 0)
+                : new Router(rawNode.id, Number(rawNode.x) || 0, Number(rawNode.y) || 0);
+
+            node.label = typeof rawNode.label === "string" && rawNode.label.trim()
+                ? rawNode.label.trim()
+                : node.id;
+            node.broken = Boolean(rawNode.broken);
+
+            this.nodes.push(node);
+            nodeMap.set(node.id, node);
+            usedIds[rawNode.type].add(numId);
+        }
+
+        // 4. Reconstruct Edges using O(1) Map lookup
+        for (const rawEdge of data.edges) {
+            const nodeA = nodeMap.get(rawEdge.from);
+            const nodeB = nodeMap.get(rawEdge.to);
+            if (!nodeA || !nodeB || nodeA === nodeB) continue;
+            if (this.edges.some(e => e.connects(nodeA, nodeB))) continue;
+
+            const numId = rawEdge.id ? parseInt(rawEdge.id.slice(1), 10) : NaN;
+            const edgeId = !isNaN(numId) && numId >= 1 ? rawEdge.id : `E${this.counters.edge++}`;
+            const weight = Math.min(Math.max(parseInt(rawEdge.weight, 10) || 1, 1), 100);
+
+            const edge = new Edge(edgeId, nodeA, nodeB, weight);
+            edge.broken = Boolean(rawEdge.broken);
+
+            nodeA.edges.push(edge);
+            nodeB.edges.push(edge);
+            this.edges.push(edge);
+
+            if (!isNaN(numId) && numId >= 1) usedIds.edge.add(numId);
+        }
+
+        // 5. Rebuild monotonic counters & spare free-list stacks for each entity type
+        for (const key of ["client", "router", "edge"]) {
+            const used = usedIds[key];
+            const maxId = used.size > 0 ? Math.max(...used) : 0;
+            this.counters[key] = maxId + 1;
+            for (let i = 1; i <= maxId; i++) {
+                if (!used.has(i)) this.spare[key].push(i);
+            }
+        }
+
+        this.isDirty = false; // Reset dirty flag after successful import
     }
 };
 
@@ -681,7 +840,7 @@ cvs.addEventListener("contextmenu", (eve) => {
     if (hitNode) {
         interaction.selectedNode = hitNode;
         interaction.selectedEdge = null;
-        if (dimension.width - dimension.worldToScreen(hitNode.x, hitNode.y).x <= 420 || dimension.height  - dimension.worldToScreen(hitNode.x, hitNode.y).y <= dimension.height / 3) {
+        if (dimension.width - dimension.worldToScreen(hitNode.x, hitNode.y).x <= 420 || dimension.height - dimension.worldToScreen(hitNode.x, hitNode.y).y <= dimension.height / 3) {
             const int = setInterval(() => {
                 dimension.x -= 7;
                 if (dimension.width - dimension.worldToScreen(hitNode.x, hitNode.y).x >= 420) {
