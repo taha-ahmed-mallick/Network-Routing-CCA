@@ -233,7 +233,209 @@ const interaction = {
 };
 
 // ==========================================
-// 3. GEOMETRY HIT-TESTING HELPERS
+// 3. THREE-PANEL INSPECTOR CONTROLLER
+// ==========================================
+const inspector = {
+    panels: {
+        client: document.getElementById("client-inspect"),
+        router: document.getElementById("router-inspect"),
+        edge: document.getElementById("edge-inspect")
+    },
+    activeType: null, // "client" | "router" | "edge" | null
+
+    init() {
+        // Attach close button listeners once on the static header images
+        Object.values(this.panels).forEach(panel => {
+            const closeBtn = panel.querySelector("div.panel-header > img");
+            closeBtn.addEventListener("click", () => this.close());
+        });
+    },
+
+    switchPanel(targetType) {
+        if (this.activeType && this.activeType !== targetType) {
+            this.panels[this.activeType].classList.remove("active");
+        }
+        this.panels[targetType].classList.add("active");
+        this.activeType = targetType;
+    },
+
+    close() {
+        if (this.activeType) {
+            this.panels[this.activeType].classList.remove("active");
+            this.activeType = null;
+        }
+        interaction.selectedNode = null;
+        interaction.selectedEdge = null;
+    },
+
+    refresh() {
+        if (interaction.selectedNode) {
+            this.openNode(interaction.selectedNode);
+        } else if (interaction.selectedEdge) {
+            this.openEdge(interaction.selectedEdge);
+        }
+    },
+
+    buildConnectionsListHTML(node) {
+        if (node.edges.length === 0) {
+            return `<span style="color:#64748b;font-size:13px;">No active links</span>`;
+        }
+        const items = node.edges.map(edge => {
+            const neighbor = edge.nodeA === node ? edge.nodeB : edge.nodeA;
+            const isBroken = edge.broken || neighbor.broken;
+            return `
+                <li class="${isBroken ? "broken-link" : ""}">
+                    <span>${neighbor.label} (${neighbor.id})</span>
+                    <span>Cost: ${edge.weight}</span>
+                </li>
+            `;
+        }).join("");
+        return `<ul class="conn-list">${items}</ul>`;
+    },
+
+    bindLabelInput(inputEl, node) {
+        const isClient = node.type === "client";
+        const panel = isClient ? this.panels.client : this.panels.router;
+        const headerIdSpan = panel.querySelector("div.panel-header h4 span");
+        inputEl.value = node.label;
+        inputEl.addEventListener("input", () => {
+            node.label = inputEl.value.trim() || node.id;
+            headerIdSpan.textContent = node.label === node.id ? node.id : `${node.id} (${node.label})`;
+        });
+        inputEl.addEventListener("keydown", (e) => {
+            if (e.key === "Enter") {
+                inputEl.blur();
+            }
+        });
+    },
+
+    openNode(node) {
+        const isClient = node.type === "client";
+        const panel = isClient ? this.panels.client : this.panels.router;
+        const headerIdSpan = panel.querySelector("div.panel-header h4 span");
+        const body = panel.querySelector("div.panel-body");
+
+        headerIdSpan.textContent = node.label === node.id ? node.id : `${node.id} (${node.label})`;
+        this.switchPanel(node.type);
+
+        // Other non-broken clients available as ping destinations
+        const otherClients = isClient
+            ? network.nodes.filter(n => n.type === "client" && n !== node && !n.broken)
+            : [];
+
+        body.innerHTML = `
+            <div class="inspect-row">
+                <span class="field-name">ID</span>
+                <span class="field-val">${node.id}</span>
+            </div>
+            ${isClient ? `
+            <div class="inspect-row">
+                <span class="field-name">IP Address</span>
+                <span class="field-val">${node.ip}</span>
+            </div>` : ""}
+            <div class="inspect-group">
+                <label for="inspect-label-input">Label <span style="font-size:11px;">(Enter to apply)</span></label>
+                <input type="text" id="inspect-label-input" maxlength="16" />
+            </div>
+            <div class="inspect-group">
+                <label>Connections (${node.edges.length})</label>
+                ${this.buildConnectionsListHTML(node)}
+            </div>
+            ${isClient ? `
+            <div class="inspect-group">
+                <label for="ping-target-select">Ping Destination</label>
+                <select id="ping-target-select" ${node.broken || otherClients.length === 0 ? "disabled" : ""}>
+                    ${otherClients.length
+                    ? otherClients.map(c => `<option value="${c.id}">${c.label} (${c.ip})</option>`).join("")
+                    : `<option value="">No active clients available</option>`}
+                </select>
+                <button id="send-ping-btn" class="panel-btn primary" ${node.broken || otherClients.length === 0 ? "disabled" : ""}>
+                    Send Ping
+                </button>
+            </div>` : ""}
+            <div class="inspect-group" style="margin-top:auto;">
+                <div class="status-row">
+                    <span class="status-badge ${node.broken ? "offline" : "online"}">
+                        ${node.broken ? "OFFLINE" : "ONLINE"}
+                    </span>
+                    <button id="toggle-node-broken" class="panel-btn ${node.broken ? "success" : "danger"}">
+                        ${node.broken ? "Enable Device" : "Disable Device"}
+                    </button>
+                </div>
+            </div>
+        `;
+
+        this.bindLabelInput(body.querySelector("#inspect-label-input"), node);
+
+        body.querySelector("#toggle-node-broken").addEventListener("click", () => {
+            node.broken = !node.broken;
+            this.openNode(node);
+        });
+
+        if (isClient) {
+            const pingBtn = body.querySelector("#send-ping-btn");
+            pingBtn.addEventListener("click", () => {
+                const targetId = body.querySelector("#ping-target-select").value;
+                if (!targetId) return;
+                // Routing payload hook will connect here in the next step
+                console.log(`Ping requested: ${node.id} -> ${targetId}`);
+            });
+        }
+    },
+
+    openEdge(edge) {
+        const panel = this.panels.edge;
+        const headerIdSpan = panel.querySelector("div.panel-header h4 span");
+        const body = panel.querySelector("div.panel-body");
+
+        headerIdSpan.textContent = edge.id;
+        this.switchPanel("edge");
+
+        body.innerHTML = `
+            <div class="inspect-row">
+                <span class="field-name">ID</span>
+                <span class="field-val">${edge.id}</span>
+            </div>
+            <div class="inspect-row">
+                <span class="field-name">Endpoints</span>
+                <span class="field-val">${edge.nodeA.label} &harr; ${edge.nodeB.label}</span>
+            </div>
+            <div class="inspect-group">
+                <label for="edge-weight-slider">
+                    <span>Link Weight (Cost)</span>
+                    <span id="edge-weight-readout" style="color:#38bdf8;font-weight:700;font-size:15px;">${edge.weight}</span>
+                </label>
+                <input type="range" id="edge-weight-slider" min="1" max="100" value="${edge.weight}" />
+            </div>
+            <div class="inspect-group" style="margin-top:auto;">
+                <div class="status-row">
+                    <span class="status-badge ${edge.broken ? "offline" : "online"}">
+                        ${edge.broken ? "DISABLED" : "ACTIVE"}
+                    </span>
+                    <button id="toggle-edge-broken" class="panel-btn ${edge.broken ? "success" : "danger"}">
+                        ${edge.broken ? "Enable Link" : "Disable Link"}
+                    </button>
+                </div>
+            </div>
+        `;
+
+        const slider = body.querySelector("#edge-weight-slider");
+        const readout = body.querySelector("#edge-weight-readout");
+        slider.addEventListener("input", () => {
+            edge.weight = parseInt(slider.value, 10);
+            readout.textContent = edge.weight;
+        });
+
+        body.querySelector("#toggle-edge-broken").addEventListener("click", () => {
+            edge.broken = !edge.broken;
+            this.openEdge(edge);
+        });
+    }
+};
+inspector.init();
+
+// ==========================================
+// 4. GEOMETRY HIT-TESTING HELPERS
 // ==========================================
 function getNodeAt(wx, wy) {
     for (let i = network.nodes.length - 1; i >= 0; i--) {
@@ -275,7 +477,7 @@ function getEdgeAt(wx, wy) {
 }
 
 // ==========================================
-// 4. ASSETS & RENDERING LOOP
+// 5. ASSETS & RENDERING LOOP
 // ==========================================
 let imgs = {
     client: new Image(),
@@ -456,14 +658,31 @@ dots();
 window.requestAnimationFrame(animation);
 
 // ==========================================
-// 5. EVENT LISTENERS
+// 6. EVENT LISTENERS
 // ==========================================
 window.addEventListener("resize", () => {
     dimension.resize();
     dots();
 });
 
-cvs.addEventListener("contextmenu", (eve) => {eve.preventDefault();});
+cvs.addEventListener("contextmenu", (eve) => {
+    eve.preventDefault();
+    const worldPos = dimension.screenToWorld(eve.clientX, eve.clientY);
+    const hitNode = getNodeAt(worldPos.x, worldPos.y);
+    const hitEdge = hitNode ? null : getEdgeAt(worldPos.x, worldPos.y);
+
+    if (hitNode) {
+        interaction.selectedNode = hitNode;
+        interaction.selectedEdge = null;
+        inspector.openNode(hitNode);
+    } else if (hitEdge) {
+        interaction.selectedEdge = hitEdge;
+        interaction.selectedNode = null;
+        inspector.openEdge(hitEdge);
+    } else {
+        inspector.close();
+    }
+});
 
 cvs.addEventListener("mousedown", (eve) => {
     if (eve.button !== 0) return;
@@ -473,6 +692,7 @@ cvs.addEventListener("mousedown", (eve) => {
 
     if (activeSideBtn === TOOLS.CLIENT) {
         network.addClient(worldPos.x, worldPos.y);
+        inspector.refresh(); // Updates ping dropdown if a client panel is currently open
     } else if (activeSideBtn === TOOLS.ROUTER) {
         network.addRouter(worldPos.x, worldPos.y);
     } else if (activeSideBtn === TOOLS.LINK) {
@@ -480,33 +700,39 @@ cvs.addEventListener("mousedown", (eve) => {
             if (!interaction.linkStartNode) {
                 interaction.linkStartNode = hitNode;
             } else {
-                network.addEdge(interaction.linkStartNode, hitNode, 1);
+                const newEdge = network.addEdge(interaction.linkStartNode, hitNode, 1);
                 interaction.linkStartNode = null;
+                if (newEdge) inspector.refresh();
             }
         } else {
             interaction.linkStartNode = null;
         }
     } else if (activeSideBtn === TOOLS.DELETE) {
         if (hitNode) {
+            const wasInspected = interaction.selectedNode === hitNode;
             network.removeNode(hitNode);
-            if (interaction.selectedNode === hitNode) interaction.selectedNode = null;
+            if (wasInspected) {
+                inspector.close();
+            } else {
+                inspector.refresh(); // Removes deleted neighbor from any open connections/ping list
+            }
         } else if (hitEdge) {
+            const wasInspected = interaction.selectedEdge === hitEdge;
             network.removeEdge(hitEdge);
-            if (interaction.selectedEdge === hitEdge) interaction.selectedEdge = null;
+            if (wasInspected) {
+                inspector.close();
+            } else {
+                inspector.refresh();
+            }
         }
     } else if (activeSideBtn === TOOLS.MOUSE) {
         if (hitNode) {
-            interaction.selectedNode = hitNode;
-            interaction.selectedEdge = null;
             interaction.draggedNode = hitNode;
             interaction.dragOffset.x = worldPos.x - hitNode.x;
             interaction.dragOffset.y = worldPos.y - hitNode.y;
-        } else if (hitEdge) {
-            interaction.selectedEdge = hitEdge;
-            interaction.selectedNode = null;
-        } else {
-            interaction.selectedNode = null;
-            interaction.selectedEdge = null;
+        } else if (!hitEdge) {
+            // Clicking empty canvas closes any open inspect panel and starts panning
+            inspector.close();
             interaction.isPanning = true;
         }
     }
