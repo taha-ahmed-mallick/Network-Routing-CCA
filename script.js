@@ -185,7 +185,6 @@ const network = {
         } else if (node.type === "router") {
             this.spare.router.push(parseInt(node.id.slice(1)));
         }
-        console.log(this.spare);
         // Remove all incident edges first
         [...node.edges].forEach(edge => this.removeEdge(edge));
         this.nodes = this.nodes.filter(n => n !== node);
@@ -463,6 +462,8 @@ window.addEventListener("resize", () => {
     dimension.resize();
     dots();
 });
+
+cvs.addEventListener("contextmenu", (eve) => {eve.preventDefault();});
 
 cvs.addEventListener("mousedown", (eve) => {
     if (eve.button !== 0) return;
