@@ -135,13 +135,21 @@ const network = {
     spare: { client: [], router: [], edge: [] },
 
     addClient(x, y) {
-        const node = new Client(`C${this.counters.client++}`, x, y);
+        let id = this.counters.client;
+        if (this.spare.client.length) {
+            id = this.spare.client.pop();
+        } else { this.counters.client++; }
+        const node = new Client(`C${id}`, x, y);
         this.nodes.push(node);
         return node;
     },
 
     addRouter(x, y) {
-        const node = new Router(`R${this.counters.router++}`, x, y);
+        let id = this.counters.router;
+        if (this.spare.router.length) {
+            id = this.spare.router.pop();
+        } else { this.counters.router++; }
+        const node = new Router(`R${id}`, x, y);
         this.nodes.push(node);
         return node;
     },
@@ -151,7 +159,12 @@ const network = {
         // Prevent duplicate edges between the same pair
         if (this.edges.some(e => e.connects(nodeA, nodeB))) return null;
 
-        const edge = new Edge(`E${this.counters.edge++}`, nodeA, nodeB, weight);
+        let id = this.counters.edge;
+        if (this.spare.edge.length) {
+            id = this.spare.edge.pop();
+        } else { this.counters.edge++; }
+
+        const edge = new Edge(`E${id}`, nodeA, nodeB, weight);
         nodeA.edges.push(edge);
         nodeB.edges.push(edge);
         this.edges.push(edge);
@@ -159,12 +172,19 @@ const network = {
     },
 
     removeEdge(edge) {
+        this.spare.edge.push(parseInt(edge.id.slice(1)));
         edge.nodeA.edges = edge.nodeA.edges.filter(e => e !== edge);
         edge.nodeB.edges = edge.nodeB.edges.filter(e => e !== edge);
         this.edges = this.edges.filter(e => e !== edge);
     },
 
     removeNode(node) {
+        if (node.type === "client") {
+            this.spare.client.push(parseInt(node.id.slice(1)));
+        } else if (node.type === "router") {
+            this.spare.router.push(parseInt(node.id.slice(1)));
+        }
+        console.log(this.spare);
         // Remove all incident edges first
         [...node.edges].forEach(edge => this.removeEdge(edge));
         this.nodes = this.nodes.filter(n => n !== node);
