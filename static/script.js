@@ -693,8 +693,17 @@ function drawEdges() {
 
         ctx.save();
         ctx.beginPath();
-        ctx.moveTo(edge.nodeA.x, edge.nodeA.y);
-        ctx.lineTo(edge.nodeB.x, edge.nodeB.y);
+        let discrepancy = 0;
+        if (edge.nodeA.type === "router") {
+            discrepancy = 10;
+        }
+        ctx.moveTo(edge.nodeA.x, edge.nodeA.y + discrepancy);
+        if (edge.nodeB.type === "router") {
+            discrepancy = 10;
+        } else {
+            discrepancy = 0;
+        }
+        ctx.lineTo(edge.nodeB.x, edge.nodeB.y + discrepancy);
 
         if (edge.broken) {
             ctx.strokeStyle = "#ef4444";
