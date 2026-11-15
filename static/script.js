@@ -71,6 +71,13 @@ class Dimensions {
             y: (screenY - this.y) / this.zoom
         };
     }
+
+    worldToScreen(worldX, worldY) {
+        return {
+            x: worldX * this.zoom + this.x,
+            y: worldY * this.zoom + this.y
+        };
+    }
 }
 let dimension = new Dimensions();
 
@@ -674,11 +681,17 @@ cvs.addEventListener("contextmenu", (eve) => {
     if (hitNode) {
         interaction.selectedNode = hitNode;
         interaction.selectedEdge = null;
-        if (dimension.width - (hitNode.x * dimension.zoom + dimension.x) <= 370) {
+        if (dimension.width - dimension.worldToScreen(hitNode.x, hitNode.y).x <= 420 || dimension.height  - dimension.worldToScreen(hitNode.x, hitNode.y).y <= dimension.height / 3) {
             const int = setInterval(() => {
                 dimension.x -= 7;
-                if (dimension.width - (hitNode.x * dimension.zoom + dimension.x) >= 420) {
+                if (dimension.width - dimension.worldToScreen(hitNode.x, hitNode.y).x >= 420) {
                     clearInterval(int);
+                }
+            }, 1);
+            const int2 = setInterval(() => {
+                dimension.y -= 7;
+                if (dimension.height - dimension.worldToScreen(hitNode.x, hitNode.y).y >= dimension.height / 3) {
+                    clearInterval(int2);
                 }
             }, 1);
         }
