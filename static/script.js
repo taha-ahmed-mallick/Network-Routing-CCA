@@ -693,16 +693,7 @@ function drawEdges() {
 
         ctx.save();
         ctx.beginPath();
-        // let discrepancy = 0;
-        // if (edge.nodeA.type === "router") {
-        //     discrepancy = 10;
-        // }
         ctx.moveTo(edge.nodeA.x, edge.nodeA.y);
-        // if (edge.nodeB.type === "router") {
-        //     discrepancy = 10;
-        // } else {
-        //     discrepancy = 0;
-        // }
         ctx.lineTo(edge.nodeB.x, edge.nodeB.y);
 
         if (edge.broken) {
@@ -757,6 +748,8 @@ function drawNodes() {
     for (const node of network.nodes) {
         const isSelected = interaction.selectedNode === node || interaction.linkStartNode === node;
         const isHovered = interaction.hoveredNode === node;
+        let discrepancy = 0;
+        if (node.type === "router") { discrepancy = 10; }
 
         if (isSelected || isHovered) {
             ctx.save();
@@ -765,7 +758,7 @@ function drawNodes() {
             ctx.beginPath();
             ctx.roundRect(
                 node.x - CONFIG.HALF_NODE - 5,
-                node.y - CONFIG.HALF_NODE - 5,
+                node.y - CONFIG.HALF_NODE - 5 - discrepancy,
                 CONFIG.NODE_SIZE + 10,
                 CONFIG.NODE_SIZE + 10,
                 8
@@ -782,7 +775,7 @@ function drawNodes() {
             ctx.drawImage(
                 img,
                 node.x - CONFIG.HALF_NODE,
-                node.y - CONFIG.HALF_NODE,
+                node.y - CONFIG.HALF_NODE - discrepancy,
                 CONFIG.NODE_SIZE,
                 CONFIG.NODE_SIZE
             );
@@ -790,7 +783,7 @@ function drawNodes() {
             ctx.fillStyle = node.type === "client" ? "#0284c7" : "#6366f1";
             ctx.fillRect(
                 node.x - CONFIG.HALF_NODE,
-                node.y - CONFIG.HALF_NODE,
+                node.y - CONFIG.HALF_NODE - discrepancy,
                 CONFIG.NODE_SIZE,
                 CONFIG.NODE_SIZE
             );
@@ -808,7 +801,7 @@ function drawNodes() {
         ctx.font = "12px Roboto, sans-serif";
         ctx.textAlign = "center";
         ctx.textBaseline = "alphabetic";
-        ctx.fillText(node.label, node.x, node.y + CONFIG.HALF_NODE + 15);
+        ctx.fillText(node.label, node.x, node.y + CONFIG.HALF_NODE + 15 - discrepancy);
     }
 }
 
