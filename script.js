@@ -172,6 +172,7 @@ const network = {
     },
 
     removeEdge(edge) {
+        if (!edge || !this.edges.includes(edge)) return;
         this.spare.edge.push(parseInt(edge.id.slice(1)));
         edge.nodeA.edges = edge.nodeA.edges.filter(e => e !== edge);
         edge.nodeB.edges = edge.nodeB.edges.filter(e => e !== edge);
