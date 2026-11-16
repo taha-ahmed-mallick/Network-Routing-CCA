@@ -41,7 +41,7 @@ for (let i = 1; i < 6; i++) {
     });
 }
 
-// Upload/save buttons functionality under construction
+// Upload/save buttons functionality
 const fileInput = document.getElementById("config-file-input");
 
 // Upload button (sideBtns[6])
@@ -805,6 +805,14 @@ function drawNodes() {
         ctx.textAlign = "center";
         ctx.textBaseline = "alphabetic";
         ctx.fillText(node.label, node.x, node.y + CONFIG.HALF_NODE + 15 - discrepancy);
+        // IP address for clients
+        if (node.type === "client") {
+            ctx.fillStyle = node.broken ? "#f87171" : "#94a3b8";
+            ctx.font = "11px Roboto, sans-serif";
+            ctx.textAlign = "center";
+            ctx.textBaseline = "alphabetic";
+            ctx.fillText(node.ip, node.x, node.y + CONFIG.HALF_NODE + 28);
+        }
     }
 }
 
