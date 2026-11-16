@@ -608,6 +608,7 @@ function getNodeAt(wx, wy) {
     for (let i = network.nodes.length - 1; i >= 0; i--) {
         const n = network.nodes[i];
         if (n.type === "router") { discrepancy = 10; }
+        else { discrepancy = 0; }
         if (
             wx >= n.x - CONFIG.HALF_NODE &&
             wx <= n.x + CONFIG.HALF_NODE &&
