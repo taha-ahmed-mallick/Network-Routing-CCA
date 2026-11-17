@@ -117,6 +117,35 @@
             <span id="sim-speed-label">1x</span>
         </div>
     </div>
+
+    <!-- Activity Logger Terminal Panel -->
+    <div id="activity-logger">
+        <div id="logger-drag-handle"></div>
+        <div id="logger-header">
+            <div class="logger-title-section">
+                <span class="logger-prompt">&gt;_</span>
+                <span class="logger-title">Activity Logger</span>
+                <span id="logger-count-badge" class="logger-badge">0 events</span>
+            </div>
+            <div class="logger-stats-section">
+                <span class="stat-item stat-tx" title="Total Packets Transmitted">TX: <strong id="stat-tx-val">0</strong></span>
+                <span class="stat-item stat-rx" title="Packets Successfully Received">RX: <strong id="stat-rx-val">0</strong></span>
+                <span class="stat-item stat-drop" title="Packets Dropped">DROP: <strong id="stat-drop-val">0</strong></span>
+            </div>
+            <div class="logger-actions">
+                <button id="logger-clear-btn" title="Clear Logs">Clear</button>
+                <button id="logger-maximize-btn" title="Toggle Maximize/Minimize">
+                    <svg id="logger-expand-icon" class="logger-icon" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M12 8l-6 6 1.41 1.41L12 10.83l4.59 4.58L18 14z"/>
+                    </svg>
+                </button>
+            </div>
+        </div>
+        <div id="logger-body">
+            <div class="logger-empty">No activity recorded yet.</div>
+        </div>
+    </div>
+
     <!-- <span id="help-btn">?</span> -->
 </body>
 

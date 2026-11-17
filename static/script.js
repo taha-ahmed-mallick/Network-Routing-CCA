@@ -443,6 +443,7 @@ const network = {
         const node = new Client(`C${id}`, x, y);
         this.nodes.push(node);
         this.markDirty();
+        activityLogger.log("NODE_ADD", `Client ${node.label} (${node.ip}) deployed.`);
         return node;
     },
 
@@ -454,6 +455,7 @@ const network = {
         const node = new Router(`R${id}`, x, y);
         this.nodes.push(node);
         this.markDirty();
+        activityLogger.log("NODE_ADD", `Router ${node.label} deployed.`);
         return node;
     },
 
@@ -472,6 +474,7 @@ const network = {
         nodeB.edges.push(edge);
         this.edges.push(edge);
         this.markDirty();
+        activityLogger.log("LINK_ADD", `Link ${edge.id} connected between ${nodeA.label} and ${nodeB.label} (cost: ${weight}).`);
         return edge;
     },
 
@@ -482,6 +485,7 @@ const network = {
         edge.nodeB.edges = edge.nodeB.edges.filter(e => e !== edge);
         this.edges = this.edges.filter(e => e !== edge);
         this.markDirty();
+        activityLogger.log("LINK_DEL", `Link ${edge.id} (${edge.nodeA.label} <-> ${edge.nodeB.label}) removed.`);
     },
 
     removeNode(node) {
@@ -494,6 +498,7 @@ const network = {
         [...node.edges].forEach(edge => this.removeEdge(edge));
         this.nodes = this.nodes.filter(n => n !== node);
         this.markDirty();
+        activityLogger.log("NODE_DEL", `${node.type === "client" ? "Client" : "Router"} ${node.label} removed.`);
     },
 
     // Generates the stripped-down JSON payload for the C++ Crow backend
@@ -580,7 +585,8 @@ const network = {
                 to: e.nodeB.id,
                 weight: e.weight,
                 broken: e.broken
-            }))
+            })),
+            activityLog: activityLogger.exportData()
         };
     },
 
@@ -597,6 +603,13 @@ const network = {
         this.edges = [];
         this.counters = { client: 1, router: 1, edge: 1 };
         this.spare = { client: [], router: [], edge: [] };
+
+        // Restore activity logs if present in JSON
+        if (data.activityLog) {
+            activityLogger.importData(data.activityLog);
+        } else {
+            activityLogger.clear();
+        }
 
         // 2. Restore camera if present
         if (data.camera && typeof data.camera.x === "number") {
@@ -815,6 +828,7 @@ const inspector = {
         body.querySelector("#toggle-node-broken").addEventListener("click", () => {
             node.broken = !node.broken;
             this.openNode(node);
+            activityLogger.log("NODE_STATE", `${node.type === "client" ? "Client" : "Router"} ${node.label} ${node.broken ? "DISABLED" : "ENABLED"}.`);
         });
 
         if (isClient) {
@@ -823,15 +837,26 @@ const inspector = {
                 const targetId = body.querySelector("#ping-target-select").value;
                 if (!targetId) return;
 
+                const targetNode = network.getNodeById(targetId);
+                const targetLabel = targetNode ? targetNode.label : targetId;
+
                 pingBtn.disabled = true;
                 const originalText = pingBtn.textContent;
                 pingBtn.textContent = "Routing...";
 
+                activityLogger.log("PING_REQ", `Ping dispatched: ${node.label} -> ${targetLabel}...`);
                 const result = await network.findShortestRoute(node.id, targetId);
                 console.log("Shortest route result:", result);
 
                 if (result && result.reachable && result.path && result.path.length >= 2) {
                     pingBtn.textContent = `Sent (Cost: ${result.cost})`;
+                    const pathStr = result.path.map(id => {
+                        const n = network.getNodeById(id);
+                        return n ? n.label : id;
+                    }).join(" -> ");
+
+                    activityLogger.log("ROUTE_FOUND", `Shortest route: ${pathStr} (Cost: ${result.cost}).`);
+                    activityLogger.log("PING_TX", `Packet departing ${node.label} towards ${targetLabel}.`);
 
                     // Instantiate and launch the forward ping packet animation
                     const pingPacket = new Packet(result.path, {
@@ -839,6 +864,9 @@ const inspector = {
                         color: "#38bdf8", // Cyan
                         onDrop: (p, atNodeId) => {
                             console.warn(`Packet dropped at ${atNodeId} due to link/node failure.`);
+                            const atNode = network.getNodeById(atNodeId);
+                            const atLabel = atNode ? atNode.label : atNodeId;
+                            activityLogger.log("DROP", `Ping packet dropped at ${atLabel} (link/device offline).`);
                             pingBtn.textContent = "Packet Dropped!";
                             setTimeout(() => {
                                 pingBtn.disabled = false;
@@ -846,6 +874,8 @@ const inspector = {
                             }, 1800);
                         },
                         onComplete: () => {
+                            activityLogger.log("PING_RX", `Ping delivered at ${targetLabel}. Generating ACK packet...`);
+                            activityLogger.log("PING_TX", `ACK reply departing ${targetLabel} towards ${node.label}.`);
                             // Automatically send a return PONG/ACK packet along reversed path
                             const returnPath = [...result.path].reverse();
                             const pongPacket = new Packet(returnPath, {
@@ -853,6 +883,9 @@ const inspector = {
                                 color: "#22c55e", // Green
                                 onDrop: (p, atNodeId) => {
                                     console.warn(`ACK packet dropped at ${atNodeId}.`);
+                                    const atNode = network.getNodeById(atNodeId);
+                                    const atLabel = atNode ? atNode.label : atNodeId;
+                                    activityLogger.log("DROP", `ACK reply dropped at ${atLabel}.`);
                                     pingBtn.textContent = "ACK Dropped!";
                                     setTimeout(() => {
                                         pingBtn.disabled = false;
@@ -860,6 +893,7 @@ const inspector = {
                                     }, 1800);
                                 },
                                 onComplete: () => {
+                                    activityLogger.log("PING_RX", `ACK received at ${node.label}. Round-trip successful!`);
                                     pingBtn.disabled = false;
                                     pingBtn.textContent = originalText;
                                 }
@@ -869,6 +903,7 @@ const inspector = {
                     });
                     packetManager.add(pingPacket);
                 } else {
+                    activityLogger.log("ROUTE_FAIL", `Destination ${targetLabel} unreachable from ${node.label}.`);
                     pingBtn.textContent = "Unreachable";
                     setTimeout(() => {
                         pingBtn.disabled = false;
@@ -917,6 +952,13 @@ const inspector = {
 
         const slider = body.querySelector("#edge-weight-slider");
         const readout = body.querySelector("#edge-weight-readout");
+        slider.addEventListener("change", () => {
+            const oldWeight = edge.weight;
+            edge.weight = parseInt(slider.value, 10);
+            readout.textContent = edge.weight;
+            network.markDirty();
+            activityLogger.log("LINK_WEIGHT", `Link ${edge.id} weight updated from ${oldWeight} to ${edge.weight}.`);
+        });
         slider.addEventListener("input", () => {
             edge.weight = parseInt(slider.value, 10);
             readout.textContent = edge.weight;
@@ -925,6 +967,7 @@ const inspector = {
         body.querySelector("#toggle-edge-broken").addEventListener("click", () => {
             edge.broken = !edge.broken;
             this.openEdge(edge);
+            activityLogger.log("LINK_STATE", `Link ${edge.id} (${edge.nodeA.label} <-> ${edge.nodeB.label}) ${edge.broken ? "DISABLED" : "ENABLED"}.`);
         });
     }
 };
@@ -1385,3 +1428,175 @@ window.addEventListener("keydown", (e) => {
         packetManager.togglePause();
     }
 });
+
+// ==========================================
+// 8. ACTIVITY LOGGER SYSTEM
+// ==========================================
+const activityLogger = {
+    logs: [],
+    stats: {
+        tx: 0,
+        rx: 0,
+        drop: 0
+    },
+    panel: document.getElementById("activity-logger"),
+    body: document.getElementById("logger-body"),
+    countBadge: document.getElementById("logger-count-badge"),
+    statTx: document.getElementById("stat-tx-val"),
+    statRx: document.getElementById("stat-rx-val"),
+    statDrop: document.getElementById("stat-drop-val"),
+    dragHandle: document.getElementById("logger-drag-handle"),
+    clearBtn: document.getElementById("logger-clear-btn"),
+    maximizeBtn: document.getElementById("logger-maximize-btn"),
+    isDragging: false,
+    startY: 0,
+    startHeight: 34,
+    defaultExpandedHeight: 200,
+
+    init() {
+        if (!this.panel) return;
+
+        // Clear button
+        if (this.clearBtn) {
+            this.clearBtn.addEventListener("click", () => this.clear());
+        }
+
+        // Toggle Maximize / Minimize button
+        if (this.maximizeBtn) {
+            this.maximizeBtn.addEventListener("click", () => {
+                const currentH = this.panel.offsetHeight;
+                if (currentH <= 45) {
+                    this.panel.style.height = `${this.defaultExpandedHeight}px`;
+                    this.panel.classList.add("expanded");
+                } else {
+                    this.panel.style.height = `34px`;
+                    this.panel.classList.remove("expanded");
+                }
+            });
+        }
+
+        // Drag-to-resize handle
+        if (this.dragHandle) {
+            this.dragHandle.addEventListener("mousedown", (e) => {
+                this.isDragging = true;
+                this.startY = e.clientY;
+                this.startHeight = this.panel.offsetHeight;
+                this.panel.classList.add("resizing");
+                document.body.style.cursor = "row-resize";
+                e.preventDefault();
+            });
+
+            window.addEventListener("mousemove", (e) => {
+                if (!this.isDragging) return;
+                const deltaY = this.startY - e.clientY; // Dragging UP increases height
+                let newHeight = this.startHeight + deltaY;
+                newHeight = Math.max(34, Math.min(newHeight, window.innerHeight * 0.75));
+                this.panel.style.height = `${newHeight}px`;
+
+                if (newHeight > 45) {
+                    this.panel.classList.add("expanded");
+                    this.defaultExpandedHeight = newHeight;
+                } else {
+                    this.panel.classList.remove("expanded");
+                }
+            });
+
+            window.addEventListener("mouseup", () => {
+                if (this.isDragging) {
+                    this.isDragging = false;
+                    this.panel.classList.remove("resizing");
+                    document.body.style.cursor = "default";
+                }
+            });
+        }
+    },
+
+    log(type, message) {
+        const now = new Date();
+        const timeStr = now.toTimeString().split(" ")[0]; // "HH:MM:SS"
+        const entry = { time: timeStr, type, message };
+        this.logs.push(entry);
+
+        // Update statistics based on event type
+        if (type === "PING_TX") this.stats.tx++;
+        else if (type === "PING_RX") this.stats.rx++;
+        else if (type === "DROP") this.stats.drop++;
+
+        this.updateStatsDisplay();
+        this.renderEntry(entry);
+    },
+
+    renderEntry(entry) {
+        if (!this.body) return;
+
+        // Remove placeholder if it's the first log
+        const emptyMsg = this.body.querySelector(".logger-empty");
+        if (emptyMsg) emptyMsg.remove();
+
+        const row = document.createElement("div");
+        row.className = "log-entry";
+
+        let tagClass = "tag-node";
+        let displayTag = entry.type;
+
+        if (entry.type.includes("NODE")) tagClass = "tag-node";
+        else if (entry.type.includes("LINK")) tagClass = "tag-link";
+        else if (entry.type.includes("ROUTE")) tagClass = "tag-route";
+        else if (entry.type.includes("PING")) tagClass = "tag-ping";
+        else if (entry.type.includes("DROP")) tagClass = "tag-drop";
+        else if (entry.type.includes("QUEUE")) tagClass = "tag-queue";
+
+        row.innerHTML = `
+            <span class="log-time">[${entry.time}]</span>
+            <span class="log-tag ${tagClass}">${displayTag}</span>
+            <span class="log-msg">${entry.message}</span>
+        `;
+
+        this.body.appendChild(row);
+        // Auto-scroll to bottom of log terminal
+        this.body.scrollTop = this.body.scrollHeight;
+    },
+
+    updateStatsDisplay() {
+        if (this.countBadge) this.countBadge.textContent = `${this.logs.length} events`;
+        if (this.statTx) this.statTx.textContent = this.stats.tx;
+        if (this.statRx) this.statRx.textContent = this.stats.rx;
+        if (this.statDrop) this.statDrop.textContent = this.stats.drop;
+    },
+
+    clear() {
+        this.logs = [];
+        this.stats = { tx: 0, rx: 0, drop: 0 };
+        this.updateStatsDisplay();
+        if (this.body) {
+            this.body.innerHTML = `<div class="logger-empty">No activity recorded yet.</div>`;
+        }
+    },
+
+    exportData() {
+        return {
+            logs: this.logs,
+            stats: this.stats
+        };
+    },
+
+    importData(data) {
+        this.clear();
+        if (!data || !Array.isArray(data.logs)) return;
+
+        if (data.stats) {
+            this.stats.tx = Number(data.stats.tx) || 0;
+            this.stats.rx = Number(data.stats.rx) || 0;
+            this.stats.drop = Number(data.stats.drop) || 0;
+        }
+
+        for (const entry of data.logs) {
+            this.logs.push(entry);
+            this.renderEntry(entry);
+        }
+        this.updateStatsDisplay();
+    }
+};
+
+// Initialize logger on load
+activityLogger.init();
