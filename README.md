@@ -10,6 +10,10 @@
 | Taha Ahmed | CT-183 |
 | Muhammad Sami Aslam | CT-185 |
 
+## Compilation Command
+
+`g++ -std=c++20 server.c++ algorithm.c++ -O2 -o ./server -lpthread`
+
 ## Description
 <!-- 
 This **Hospital Management System** is a lightweight, high-performance console application written in C++ that models real-world clinical workflows. Built with clean Object-Oriented Programming (OOP) principles, it provides tailored terminal interfaces for both **Doctors** and **Patients** without relying on external database engines.
