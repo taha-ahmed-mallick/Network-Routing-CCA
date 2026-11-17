@@ -335,7 +335,7 @@ canvas {
 div#sim-controls {
     position: absolute;
     top: 7px;
-    right: 55px;
+    right: 15px;
     background: #0f172a;
     border: 1px solid #27303d;
     padding: 3px 5px;
