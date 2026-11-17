@@ -133,6 +133,7 @@ class NetworkNode {
         this.label = id;
         this.broken = false;
         this.edges = []; // References to connected Edge instances
+        this.queue = []; // FIFO packet buffer waiting to depart from this node
     }
 }
 
@@ -183,6 +184,9 @@ class Packet {
 
         // Discrete step-animation state: animates smoothly to target hop when stepped
         this.targetHopIndex = null;
+
+        // Edge transmission lock state: true when packet has acquired the physical edge
+        this.isTransmitting = false;
     }
 
     // Returns the edge object between the current hop's endpoints
@@ -236,6 +240,21 @@ class Packet {
             return false;
         }
 
+        // Router Queue & Link Reservation: only one packet can transmit on an edge at a time
+        if (!this.isTransmitting) {
+            const edgeInUseByOther = packetManager.isEdgeTransmitting(edge, this);
+            if (edgeInUseByOther) {
+                // Another packet is currently occupying this link -> wait in current node's queue!
+                if (!fromNode.queue.includes(this)) {
+                    fromNode.queue.push(this);
+                }
+                return false;
+            }
+            // Link is free: remove from node's queue and start transmission
+            fromNode.queue = fromNode.queue.filter(p => p !== this);
+            this.isTransmitting = true;
+        }
+
         // When paused and not in the middle of a step hop, don't move
         if (!allowContinuous && this.targetHopIndex === null) {
             return false;
@@ -248,6 +267,7 @@ class Packet {
         if (this.progress >= 1.0) {
             this.progress = 0.0;
             this.hopIndex++;
+            this.isTransmitting = false; // Release the edge so queued packets can use it
 
             const arrivedNode = network.getNodeById(this.path[this.hopIndex]);
 
@@ -331,6 +351,12 @@ const packetManager = {
 
     setSpeed(multiplier) {
         this.speedMultiplier = Math.max(0.1, multiplier);
+    },
+
+    // Checks whether another packet is currently actively transmitting across this edge
+    isEdgeTransmitting(edge, currentPacket) {
+        if (!edge) return false;
+        return this.packets.some(p => p !== currentPacket && p.isTransmitting && !p.isDone && !p.isDropped && p.getCurrentEdge() === edge);
     },
 
     // Checks whether an edge connects consecutive nodes in ANY active packet's route
@@ -1123,6 +1149,27 @@ function drawNodes() {
             ctx.textAlign = "center";
             ctx.textBaseline = "alphabetic";
             ctx.fillText(node.ip, node.x, node.y + CONFIG.HALF_NODE + 28);
+        }
+
+        // Draw FIFO Queue Badge on router if packets are waiting in buffer
+        if (node.queue && node.queue.length > 0) {
+            const badgeX = node.x + CONFIG.HALF_NODE - 5;
+            const badgeY = node.y - CONFIG.HALF_NODE - discrepancy + 5;
+            ctx.save();
+            ctx.beginPath();
+            ctx.arc(badgeX, badgeY, 10, 0, Math.PI * 2);
+            ctx.fillStyle = "#f59e0b"; // Amber queue badge
+            ctx.fill();
+            ctx.strokeStyle = "#0f172a";
+            ctx.lineWidth = 2;
+            ctx.stroke();
+
+            ctx.fillStyle = "#ffffff";
+            ctx.font = "bold 10px Roboto, sans-serif";
+            ctx.textAlign = "center";
+            ctx.textBaseline = "middle";
+            ctx.fillText(node.queue.length, badgeX, badgeY);
+            ctx.restore();
         }
     }
 }
