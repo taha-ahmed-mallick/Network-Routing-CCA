@@ -95,6 +95,61 @@ int main()
 
         return crow::response(result); });
 
+    // 4. POST "/traverse" -> Receives network JSON + traversal type ("bfs"/"dfs") + start node, returns visited order & steps
+    CROW_ROUTE(app, "/traverse").methods(crow::HTTPMethod::POST)([](const crow::request &req)
+                                                                 {
+        auto body = crow::json::load(req.body);
+        if (!body) {
+            return crow::response(400, "Invalid JSON payload");
+        }
+
+        std::string type = body.has("type") ? std::string(body["type"].s()) : "bfs";
+        std::string start = body.has("start") ? std::string(body["start"].s()) : "";
+
+        // Parse nodes and edges from the stateless payload
+        std::vector<routing::RawNode> nodes;
+        if (body.has("nodes")) {
+            for (const auto &nodeItem : body["nodes"]) {
+                std::string id = std::string(nodeItem["id"].s());
+                std::string nodeType = nodeItem.has("type") ? std::string(nodeItem["type"].s()) : "router";
+                nodes.push_back({id, nodeType});
+            }
+        }
+
+        std::vector<routing::RawEdge> edges;
+        if (body.has("edges")) {
+            for (const auto &edgeItem : body["edges"]) {
+                std::string from = edgeItem["from"].s();
+                std::string to = edgeItem["to"].s();
+                int weight = edgeItem["weight"].i();
+                edges.push_back({from, to, weight});
+            }
+        }
+
+        // Execute BFS or DFS traversal on Network graph
+        routing::TraversalResult travRes = routing::findTraversal(type, start, nodes, edges);
+
+        crow::json::wvalue result;
+        result["type"] = travRes.type;
+        result["start"] = travRes.start;
+
+        std::vector<crow::json::wvalue> orderList;
+        for (const auto &id : travRes.order) {
+            orderList.push_back(id);
+        }
+        result["order"] = crow::json::wvalue::list(orderList);
+
+        std::vector<crow::json::wvalue> stepsList;
+        for (const auto &step : travRes.steps) {
+            crow::json::wvalue s;
+            s["from"] = step.from;
+            s["to"] = step.to;
+            stepsList.push_back(std::move(s));
+        }
+        result["steps"] = crow::json::wvalue::list(stepsList);
+
+        return crow::response(result); });
+
     // Start multi-threaded HTTP server on port 8000
     app.port(8000).multithreaded().run();
     return 0;

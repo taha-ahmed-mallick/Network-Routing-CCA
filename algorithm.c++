@@ -381,10 +381,13 @@ namespace routing {
         return labelList;
     }
 
-    std::vector<std::string> Network::bfs(const std::string &startLabel) const {
-        std::vector<std::string> order;
+    TraversalResult Network::runBFS(const std::string &startLabel) const {
+        TraversalResult res;
+        res.type = "bfs";
+        res.start = startLabel;
+
         int start = registry.find(startLabel);
-        if (start == -1) return order;
+        if (start == -1) return res;
 
         int numVertices = static_cast<int>(nodes.size());
         std::vector<bool> visited(numVertices, false);
@@ -393,50 +396,75 @@ namespace routing {
 
         queue.push_back(start);
         visited[start] = true;
+        res.steps.push_back({"", nodes[start].label});
 
         while (front < queue.size()) {
             int current = queue[front++];
-            order.push_back(nodes[current].label);
+            res.order.push_back(nodes[current].label);
 
             for (const auto &edge : adjacency[current]) {
                 int next = edge.to;
                 if (nodes[next].active && !visited[next]) {
                     visited[next] = true;
                     queue.push_back(next);
+                    res.steps.push_back({nodes[current].label, nodes[next].label});
                 }
             }
         }
-        return order;
+        return res;
     }
 
-    std::vector<std::string> Network::dfs(const std::string &startLabel) const {
-        std::vector<std::string> order;
+    std::vector<std::string> Network::bfs(const std::string &startLabel) const {
+        return runBFS(startLabel).order;
+    }
+
+    TraversalResult Network::runDFS(const std::string &startLabel) const {
+        TraversalResult res;
+        res.type = "dfs";
+        res.start = startLabel;
+
         int start = registry.find(startLabel);
-        if (start == -1) return order;
+        if (start == -1) return res;
 
         int numVertices = static_cast<int>(nodes.size());
         std::vector<bool> visited(numVertices, false);
-        std::vector<int> stack;
 
-        stack.push_back(start);
+        struct StackItem {
+            int vertex;
+            int parent;
+        };
+
+        std::vector<StackItem> stack;
+        stack.push_back({start, -1});
 
         while (!stack.empty()) {
-            int current = stack.back();
+            StackItem item = stack.back();
             stack.pop_back();
 
+            int current = item.vertex;
             if (visited[current]) continue;
             visited[current] = true;
-            order.push_back(nodes[current].label);
 
-            // Traverse adjacent neighbors in reverse order for consistent traversal
+            res.order.push_back(nodes[current].label);
+            if (item.parent == -1) {
+                res.steps.push_back({"", nodes[current].label});
+            } else {
+                res.steps.push_back({nodes[item.parent].label, nodes[current].label});
+            }
+
+            // Traverse in reverse order of adjacency list to match main.cpp's DFS order
             for (int i = static_cast<int>(adjacency[current].size()) - 1; i >= 0; --i) {
                 int next = adjacency[current][i].to;
                 if (nodes[next].active && !visited[next]) {
-                    stack.push_back(next);
+                    stack.push_back({next, current});
                 }
             }
         }
-        return order;
+        return res;
+    }
+
+    std::vector<std::string> Network::dfs(const std::string &startLabel) const {
+        return runDFS(startLabel).order;
     }
 
     // -------------------------------------------------------------
@@ -476,6 +504,36 @@ namespace routing {
         }
 
         return result;
+    }
+
+    // -------------------------------------------------------------
+    // Bridge Function: findTraversal (BFS / DFS)
+    // -------------------------------------------------------------
+
+    TraversalResult findTraversal(
+        const std::string &type,
+        const std::string &start,
+        const std::vector<RawNode> &rawNodes,
+        const std::vector<RawEdge> &edges
+    ) {
+        Network net;
+
+        // Populate nodes with their specific NodeType
+        for (const auto &rn : rawNodes) {
+            NodeType nt = (rn.type == "client") ? NodeType::CLIENT : NodeType::ROUTER;
+            net.addNode(rn.id, nt);
+        }
+
+        // Add undirected links symmetrically
+        for (const auto &e : edges) {
+            net.addLink(e.from, e.to, e.weight);
+        }
+
+        if (type == "dfs") {
+            return net.runDFS(start);
+        } else {
+            return net.runBFS(start);
+        }
     }
 
 } // namespace routing

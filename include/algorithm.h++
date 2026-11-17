@@ -80,6 +80,20 @@ namespace routing {
             : label(lbl), type(t), active(true) {}
     };
 
+    // Step in a graph traversal (from parent to child; from is empty for root start node)
+    struct TraversalStep {
+        std::string from;
+        std::string to;
+    };
+
+    // Full traversal outcome returned to server and frontend
+    struct TraversalResult {
+        std::string type; // "bfs" or "dfs"
+        std::string start;
+        std::vector<std::string> order;
+        std::vector<TraversalStep> steps;
+    };
+
     // Core Network topology class
     // Manages dynamic vertices (routers and clients) and undirected links
     class Network {
@@ -120,6 +134,10 @@ namespace routing {
         // Graph traversals
         std::vector<std::string> bfs(const std::string &startLabel) const;
         std::vector<std::string> dfs(const std::string &startLabel) const;
+
+        // Rich graph traversals returning ordered steps for frontend visualization
+        TraversalResult runBFS(const std::string &startLabel) const;
+        TraversalResult runDFS(const std::string &startLabel) const;
     };
 
     // Input edge struct from JSON payload
@@ -147,6 +165,14 @@ namespace routing {
         const std::string &src,
         const std::string &dest,
         const std::vector<RawNode> &nodes,
+        const std::vector<RawEdge> &edges
+    );
+
+    // Bridge function: builds a dynamic Network topology and executes BFS or DFS traversal
+    TraversalResult findTraversal(
+        const std::string &type,
+        const std::string &start,
+        const std::vector<RawNode> &rawNodes,
         const std::vector<RawEdge> &edges
     );
 

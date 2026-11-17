@@ -415,6 +415,200 @@ const packetManager = {
     }
 };
 
+// Graph Traversal Manager (handles BFS & DFS visual step animation)
+const traversalManager = {
+    isRunning: false,
+    type: "BFS",
+    startNodeId: null,
+    order: [],
+    steps: [],
+    stepIndex: 0,
+    progress: 0.0,
+    visitedNodes: new Set(),
+    visitedEdges: new Set(),
+    nodeOrderMap: new Map(),
+    finishCooldown: 0,
+
+    start(type, startId, order, steps) {
+        // Guarantee clean exclusive state: cancel any in-flight packets and clear queues
+        packetManager.packets = [];
+        for (const n of network.nodes) {
+            n.queue = [];
+        }
+
+        this.isRunning = true;
+        this.type = type.toUpperCase();
+        this.startNodeId = startId;
+        this.order = order || [];
+        this.steps = steps || [];
+        this.stepIndex = 0;
+        this.progress = 0.0;
+        this.visitedNodes = new Set();
+        this.visitedEdges = new Set();
+        this.nodeOrderMap = new Map();
+        this.finishCooldown = 0;
+
+        // Build 1-based order map: nodeId -> order number
+        for (let i = 0; i < this.order.length; i++) {
+            this.nodeOrderMap.set(this.order[i], i + 1);
+        }
+
+        // If step 0 has no source parent, immediately mark start root as visited
+        if (this.steps.length > 0 && (!this.steps[0].from || this.steps[0].from === "")) {
+            this.visitedNodes.add(this.steps[0].to);
+            this.stepIndex = 1;
+        } else if (startId) {
+            this.visitedNodes.add(startId);
+        }
+
+        this.updateButtonsUI();
+    },
+
+    stop() {
+        this.isRunning = false;
+        this.visitedNodes.clear();
+        this.visitedEdges.clear();
+        this.nodeOrderMap.clear();
+        this.finishCooldown = 0;
+        this.updateButtonsUI();
+    },
+
+    updateButtonsUI() {
+        const bfsBtn = document.getElementById("btn-bfs");
+        const dfsBtn = document.getElementById("btn-dfs");
+        if (bfsBtn && dfsBtn) {
+            if (this.isRunning) {
+                if (this.type === "BFS") {
+                    bfsBtn.classList.add("active");
+                    dfsBtn.classList.remove("active");
+                } else {
+                    dfsBtn.classList.add("active");
+                    bfsBtn.classList.remove("active");
+                }
+            } else {
+                bfsBtn.classList.remove("active");
+                dfsBtn.classList.remove("active");
+            }
+        }
+    },
+
+    isEdgeHighlighted(edge) {
+        if (!this.isRunning && this.visitedEdges.size === 0) return false;
+        if (this.visitedEdges.has(edge)) return true;
+
+        // Also highlight current step edge in progress
+        if (this.isRunning && this.stepIndex < this.steps.length) {
+            const step = this.steps[this.stepIndex];
+            if (step && step.from && step.to) {
+                if ((edge.nodeA.id === step.from && edge.nodeB.id === step.to) ||
+                    (edge.nodeA.id === step.to && edge.nodeB.id === step.from)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    },
+
+    isNodeVisited(nodeId) {
+        return this.visitedNodes.has(nodeId);
+    },
+
+    getNodeOrderNumber(nodeId) {
+        return this.nodeOrderMap.get(nodeId) || null;
+    },
+
+    step() {
+        if (!this.isRunning) return;
+
+        // If currently in cooldown after finishing, finish immediately
+        if (this.stepIndex >= this.steps.length) {
+            this.stop();
+            return;
+        }
+
+        // Advance current step immediately to completion
+        const step = this.steps[this.stepIndex];
+        if (step) {
+            this.visitedNodes.add(step.to);
+            const edge = network.edges.find(e =>
+                (e.nodeA.id === step.from && e.nodeB.id === step.to) ||
+                (e.nodeA.id === step.to && e.nodeB.id === step.from)
+            );
+            if (edge) this.visitedEdges.add(edge);
+        }
+
+        this.stepIndex++;
+        this.progress = 0.0;
+    },
+
+    update() {
+        if (!this.isRunning) return;
+
+        // All traversal steps completed -> stay lit for 1.5 seconds then resume
+        if (this.stepIndex >= this.steps.length) {
+            if (this.finishCooldown === 0) {
+                this.finishCooldown = Date.now();
+                activityLogger.log("TRAVERSAL", `${this.type} traversal complete. Order: ${this.order.join(" -> ")}`);
+            } else if (Date.now() - this.finishCooldown > 1500) {
+                this.stop();
+            }
+            return;
+        }
+
+        // When paused, wait for Step button or Resume
+        if (packetManager.isPaused) return;
+
+        const effectiveSpeed = 0.035 * packetManager.speedMultiplier;
+        this.progress += effectiveSpeed;
+
+        if (this.progress >= 1.0) {
+            this.progress = 0.0;
+            const step = this.steps[this.stepIndex];
+            if (step) {
+                this.visitedNodes.add(step.to);
+                const edge = network.edges.find(e =>
+                    (e.nodeA.id === step.from && e.nodeB.id === step.to) ||
+                    (e.nodeA.id === step.to && e.nodeB.id === step.from)
+                );
+                if (edge) this.visitedEdges.add(edge);
+            }
+            this.stepIndex++;
+        }
+    },
+
+    draw(context) {
+        if (!this.isRunning) return;
+
+        // Draw animated traveling golden energy pulse across current step's edge
+        if (this.stepIndex < this.steps.length) {
+            const step = this.steps[this.stepIndex];
+            if (step && step.from && step.to) {
+                const fromNode = network.getNodeById(step.from);
+                const toNode = network.getNodeById(step.to);
+                if (fromNode && toNode) {
+                    const px = fromNode.x + (toNode.x - fromNode.x) * this.progress;
+                    const py = fromNode.y + (toNode.y - fromNode.y) * this.progress;
+
+                    context.save();
+                    context.shadowColor = "#facc15";
+                    context.shadowBlur = 18;
+                    context.beginPath();
+                    context.arc(px, py, 9, 0, Math.PI * 2);
+                    context.fillStyle = "#eab308";
+                    context.fill();
+
+                    context.shadowBlur = 0;
+                    context.beginPath();
+                    context.arc(px, py, 4.5, 0, Math.PI * 2);
+                    context.fillStyle = "#ffffff";
+                    context.fill();
+                    context.restore();
+                }
+            }
+        }
+    }
+};
+
 // ==========================================
 // 2. CENTRALIZED NETWORK & INTERACTION STATE
 // ==========================================
@@ -444,6 +638,7 @@ const network = {
         this.nodes.push(node);
         this.markDirty();
         activityLogger.log("NODE_ADD", `Client ${node.label} (${node.ip}) deployed.`);
+        if (typeof updateTraversalDropdown === "function") updateTraversalDropdown();
         return node;
     },
 
@@ -456,6 +651,7 @@ const network = {
         this.nodes.push(node);
         this.markDirty();
         activityLogger.log("NODE_ADD", `Router ${node.label} deployed.`);
+        if (typeof updateTraversalDropdown === "function") updateTraversalDropdown();
         return node;
     },
 
@@ -499,6 +695,7 @@ const network = {
         this.nodes = this.nodes.filter(n => n !== node);
         this.markDirty();
         activityLogger.log("NODE_DEL", `${node.type === "client" ? "Client" : "Router"} ${node.label} removed.`);
+        if (typeof updateTraversalDropdown === "function") updateTraversalDropdown();
     },
 
     // Generates the stripped-down JSON payload for the C++ Crow backend
@@ -557,6 +754,52 @@ const network = {
         } catch (err) {
             console.error("Routing request failed:", err);
             return { reachable: false, cost: -1, path: [], error: err.message };
+        }
+    },
+
+    // Generates the graph topology payload for BFS/DFS traversal
+    toTraversalPayload(startId, type) {
+        const validNodes = this.nodes.filter(n => !n.broken);
+        const validIds = new Set(validNodes.map(n => n.id));
+
+        const validEdges = this.edges
+            .filter(e => !e.broken && validIds.has(e.nodeA.id) && validIds.has(e.nodeB.id))
+            .map(e => ({
+                from: e.nodeA.id,
+                to: e.nodeB.id,
+                weight: e.weight
+            }));
+
+        return {
+            type: type, // "bfs" or "dfs"
+            start: startId,
+            nodes: validNodes.map(n => ({ id: n.id, type: n.type })),
+            edges: validEdges
+        };
+    },
+
+    // Queries the C++ Crow backend for BFS or DFS traversal
+    async findTraversal(startId, type) {
+        const payload = this.toTraversalPayload(startId, type);
+        try {
+            const response = await fetch("/traverse", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify(payload)
+            });
+
+            if (!response.ok) {
+                const errorText = await response.text();
+                throw new Error(`HTTP ${response.status}: ${errorText}`);
+            }
+
+            const data = await response.json();
+            return data;
+        } catch (err) {
+            console.error("Traversal request failed:", err);
+            return { type, start: startId, order: [], steps: [], error: err.message };
         }
     },
 
@@ -675,6 +918,7 @@ const network = {
         }
 
         this.isDirty = false; // Reset dirty flag after successful import
+        if (typeof updateTraversalDropdown === "function") updateTraversalDropdown();
     }
 };
 
@@ -759,6 +1003,7 @@ const inspector = {
         inputEl.addEventListener("input", () => {
             node.label = inputEl.value.trim() || node.id;
             headerIdSpan.textContent = node.label === node.id ? node.id : `${node.id} (${node.label})`;
+            if (typeof updateTraversalDropdown === "function") updateTraversalDropdown();
         });
         inputEl.addEventListener("keydown", (e) => {
             if (e.key === "Enter") {
@@ -829,11 +1074,16 @@ const inspector = {
             node.broken = !node.broken;
             this.openNode(node);
             activityLogger.log("NODE_STATE", `${node.type === "client" ? "Client" : "Router"} ${node.label} ${node.broken ? "DISABLED" : "ENABLED"}.`);
+            if (typeof updateTraversalDropdown === "function") updateTraversalDropdown();
         });
 
         if (isClient) {
             const pingBtn = body.querySelector("#send-ping-btn");
             pingBtn.addEventListener("click", async () => {
+                if (traversalManager.isRunning) {
+                    alert("Graph traversal animation is currently running. Please wait for it to complete.");
+                    return;
+                }
                 const targetId = body.querySelector("#ping-target-select").value;
                 if (!targetId) return;
 
@@ -1066,7 +1316,8 @@ function drawEdges() {
     for (const edge of network.edges) {
         const isSelected = interaction.selectedEdge === edge;
         const isHovered = interaction.hoveredEdge === edge;
-        const isHighlighted = packetManager.isEdgeInHighlightedPath(edge.nodeA.id, edge.nodeB.id);
+        const isTraversalEdge = traversalManager.isEdgeHighlighted(edge);
+        const isHighlighted = packetManager.isEdgeInHighlightedPath(edge.nodeA.id, edge.nodeB.id) || isTraversalEdge;
 
         ctx.save();
         ctx.beginPath();
@@ -1214,6 +1465,46 @@ function drawNodes() {
             ctx.fillText(node.queue.length, badgeX, badgeY);
             ctx.restore();
         }
+
+        // Draw Traversal Visited Highlight & Order Badge
+        if (traversalManager.isNodeVisited(node.id)) {
+            ctx.save();
+            ctx.strokeStyle = "#eab308";
+            ctx.lineWidth = 3;
+            ctx.shadowColor = "rgba(234, 179, 8, 0.75)";
+            ctx.shadowBlur = 14;
+            ctx.beginPath();
+            ctx.roundRect(
+                node.x - CONFIG.HALF_NODE - 4,
+                node.y - CONFIG.HALF_NODE - 4 - discrepancy,
+                CONFIG.NODE_SIZE + 8,
+                CONFIG.NODE_SIZE + 8,
+                8
+            );
+            ctx.stroke();
+            ctx.restore();
+
+            const orderNum = traversalManager.getNodeOrderNumber(node.id);
+            if (orderNum !== null) {
+                const badgeX = node.x - CONFIG.HALF_NODE + 6;
+                const badgeY = node.y - CONFIG.HALF_NODE - discrepancy + 6;
+                ctx.save();
+                ctx.beginPath();
+                ctx.arc(badgeX, badgeY, 9, 0, Math.PI * 2);
+                ctx.fillStyle = "#eab308";
+                ctx.fill();
+                ctx.strokeStyle = "#0f172a";
+                ctx.lineWidth = 1.5;
+                ctx.stroke();
+
+                ctx.fillStyle = "#0f172a";
+                ctx.font = "bold 9px Roboto, sans-serif";
+                ctx.textAlign = "center";
+                ctx.textBaseline = "middle";
+                ctx.fillText(orderNum, badgeX, badgeY);
+                ctx.restore();
+            }
+        }
     }
 }
 
@@ -1232,6 +1523,8 @@ function animation(currentTime) {
     drawEdges();
     drawNodes();
     packetManager.updateAndDraw(ctx);
+    traversalManager.update();
+    traversalManager.draw(ctx);
 
     window.requestAnimationFrame(animation);
 }
@@ -1405,8 +1698,12 @@ if (playPauseBtn) {
 
 if (stepBtn) {
     stepBtn.addEventListener("click", () => {
-        // Step forward one animation tick
-        packetManager.step();
+        // Step forward one animation tick (for traversal if active, otherwise packets)
+        if (traversalManager.isRunning) {
+            traversalManager.step();
+        } else {
+            packetManager.step();
+        }
     });
 }
 
@@ -1600,3 +1897,81 @@ const activityLogger = {
 
 // Initialize logger on load
 activityLogger.init();
+
+// ==========================================
+// 9. GRAPH TRAVERSAL CONTROLS (BFS & DFS)
+// ==========================================
+function updateTraversalDropdown() {
+    const select = document.getElementById("traversal-start-select");
+    if (!select) return;
+    const currentVal = select.value;
+    select.innerHTML = `<option value="">Start Node</option>`;
+
+    // Include all active nodes (routers and clients)
+    const sortedNodes = [...network.nodes].filter(n => !n.broken).sort((a, b) => {
+        if (a.type !== b.type) return a.type === "router" ? -1 : 1;
+        return a.id.localeCompare(b.id, undefined, { numeric: true });
+    });
+
+    for (const node of sortedNodes) {
+        const opt = document.createElement("option");
+        opt.value = node.id;
+        opt.textContent = `${node.label} (${node.type === "router" ? "Router" : "Client"})`;
+        select.appendChild(opt);
+    }
+
+    if (currentVal && network.nodes.some(n => n.id === currentVal && !n.broken)) {
+        select.value = currentVal;
+    }
+}
+
+const btnBfs = document.getElementById("btn-bfs");
+const btnDfs = document.getElementById("btn-dfs");
+const traversalSelect = document.getElementById("traversal-start-select");
+
+async function handleStartTraversal(type) {
+    inspector.close();
+    if (!traversalSelect || !traversalSelect.value) {
+        alert("Please select a starting node from the dropdown first.");
+        return;
+    }
+
+    const startId = traversalSelect.value;
+    const startNode = network.getNodeById(startId);
+    if (!startNode || startNode.broken) {
+        alert("Selected start node is offline or invalid.");
+        return;
+    }
+
+    // Ensure no packets are running or queued
+    packetManager.packets = [];
+    for (const n of network.nodes) {
+        n.queue = [];
+    }
+
+    const typeUpper = type.toUpperCase();
+    activityLogger.log("TRAVERSAL", `Starting ${typeUpper} traversal from ${startNode.label}...`);
+
+    const data = await network.findTraversal(startId, type);
+    if (data && data.order && data.order.length > 0) {
+        const orderLabels = data.order.map(id => {
+            const n = network.getNodeById(id);
+            return n ? n.label : id;
+        });
+        activityLogger.log("TRAVERSAL", `${typeUpper} order: ${orderLabels.join(" -> ")}`);
+        traversalManager.start(type, startId, data.order, data.steps || []);
+    } else {
+        activityLogger.log("TRAVERSAL", `${typeUpper} found no reachable connections from ${startNode.label}.`);
+    }
+}
+
+if (btnBfs) {
+    btnBfs.addEventListener("click", () => handleStartTraversal("bfs"));
+}
+
+if (btnDfs) {
+    btnDfs.addEventListener("click", () => handleStartTraversal("dfs"));
+}
+
+// Populate dropdown initially
+updateTraversalDropdown();

@@ -331,6 +331,78 @@ canvas {
     background: #00000000;
 }
 
+/* Graph Traversal Controls (BFS & DFS) */
+div#traversal-controls {
+    position: absolute;
+    top: 7px;
+    right: 235px;
+    background: #0f172a;
+    border: 1px solid #27303d;
+    padding: 3px 6px;
+    border-radius: 0.75rem;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    box-shadow: 1px 2px 9px 0px #152447;
+    z-index: 20;
+}
+
+div#traversal-controls select#traversal-start-select {
+    background: #1e293b;
+    border: 1px solid #343d4b;
+    border-radius: 7px;
+    color: #e2e8f0;
+    padding: 4px 8px;
+    font-size: 12px;
+    font-family: inherit;
+    outline: none;
+    cursor: pointer;
+    font-weight: 500;
+    max-width: 140px;
+}
+
+div#traversal-controls select#traversal-start-select:focus {
+    border-color: #38bdf8;
+}
+
+div#traversal-controls button.traversal-btn {
+    padding: 5px 12px;
+    background-color: #1e293b;
+    border: 1px solid #343d4b;
+    border-radius: 7px;
+    color: #ffffff;
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background-color 200ms linear, transform 150ms ease-out, color 50ms linear, border-color 200ms ease, box-shadow 200ms ease;
+}
+
+div#traversal-controls button.traversal-btn:hover {
+    background-color: #263750;
+    color: #38bdf8;
+    border-color: #38bdf8;
+}
+
+div#traversal-controls button.traversal-btn:active {
+    transform: scale(0.90);
+}
+
+div#traversal-controls button.traversal-btn.active {
+    background-color: #0284c7;
+    border-color: #38bdf8;
+    color: #ffffff;
+    box-shadow: 0 0 10px rgba(56, 189, 248, 0.6);
+}
+
+div#traversal-controls button.traversal-btn:disabled,
+div#traversal-controls select#traversal-start-select:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+}
+
 /* Simulation playback controls (Play/Pause and Step) */
 div#sim-controls {
     position: absolute;
