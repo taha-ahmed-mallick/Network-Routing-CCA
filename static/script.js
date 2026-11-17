@@ -166,30 +166,106 @@ class Edge {
     }
 }
 
-// Packet class to manage packet transit state and hop-by-hop animation
+// Packet class to manage packet transit state, hop-by-hop animation, and failure handling
 class Packet {
     constructor(pathNodeIds, options = {}) {
         this.path = pathNodeIds; // e.g. ["C1", "R1", "R2", "C2"]
         this.hopIndex = 0;       // Current starting node index in this.path
         this.progress = 0.0;     // Progress along current edge: [0.0 -> 1.0]
         this.speed = options.speed || 0.035; // Speed of movement per animation frame
-        this.color = options.color || "#38bdf8"; // Cyan packet glow
+        this.color = options.color || "#38bdf8"; // Default cyan packet glow
         this.isDone = false;
+        this.isDropped = false;  // True when packet encountered a broken node or link
+        this.dropFade = 1.0;     // Fade-out opacity when dropped
         this.payload = options.payload || "PING";
         this.onComplete = options.onComplete || null;
+        this.onDrop = options.onDrop || null;
+
+        // Discrete step-animation state: animates smoothly to target hop when stepped
+        this.targetHopIndex = null;
     }
 
-    // Advances the packet along the path; returns true when packet has arrived at destination
-    update() {
-        if (this.isDone || this.path.length < 2) {
+    // Returns the edge object between the current hop's endpoints
+    getCurrentEdge() {
+        if (this.hopIndex >= this.path.length - 1) return null;
+        const u = this.path[this.hopIndex];
+        const v = this.path[this.hopIndex + 1];
+        return network.edges.find(e => (e.nodeA.id === u && e.nodeB.id === v) || (e.nodeA.id === v && e.nodeB.id === u)) || null;
+    }
+
+    // Schedules a smooth travel animation forward to the next router/node
+    stepHop() {
+        if (this.isDone || this.path.length < 2) return;
+        if (this.targetHopIndex === null) {
+            this.targetHopIndex = this.hopIndex + 1;
+        } else {
+            this.targetHopIndex++;
+        }
+    }
+
+    // Advances the packet along the path; returns true when packet has finished or vanished
+    update(allowContinuous = true) {
+        if (this.isDone) return true;
+
+        // If the packet has been dropped, animate a quick fade-out
+        if (this.isDropped) {
+            this.dropFade -= 0.05;
+            if (this.dropFade <= 0) {
+                this.isDone = true;
+                return true;
+            }
+            return false;
+        }
+
+        if (this.path.length < 2) {
             this.isDone = true;
             return true;
         }
 
-        this.progress += this.speed;
+        const fromNode = network.getNodeById(this.path[this.hopIndex]);
+        const toNode = network.getNodeById(this.path[this.hopIndex + 1]);
+        const edge = this.getCurrentEdge();
+
+        // If the cable itself was cut/deleted or source node was destroyed, drop immediately
+        if (!fromNode || !edge || edge.broken) {
+            this.isDropped = true;
+            this.color = "#ef4444";
+            if (typeof this.onDrop === "function") {
+                this.onDrop(this, fromNode ? fromNode.id : "link");
+            }
+            return false;
+        }
+
+        // When paused and not in the middle of a step hop, don't move
+        if (!allowContinuous && this.targetHopIndex === null) {
+            return false;
+        }
+
+        const effectiveSpeed = this.speed * packetManager.speedMultiplier;
+        this.progress += effectiveSpeed;
+
+        // Once the packet completes traversal across the wire and reaches the destination node:
         if (this.progress >= 1.0) {
             this.progress = 0.0;
             this.hopIndex++;
+
+            const arrivedNode = network.getNodeById(this.path[this.hopIndex]);
+
+            // If the node the packet just arrived at is broken or non-existent, drop it right here!
+            if (!arrivedNode || arrivedNode.broken) {
+                this.isDropped = true;
+                this.color = "#ef4444";
+                if (typeof this.onDrop === "function") {
+                    this.onDrop(this, arrivedNode ? arrivedNode.id : "unknown");
+                }
+                return false;
+            }
+
+            // If we reached our stepped destination hop, pause movement until next step or play
+            if (this.targetHopIndex !== null && this.hopIndex >= this.targetHopIndex) {
+                this.targetHopIndex = null;
+            }
+
             if (this.hopIndex >= this.path.length - 1) {
                 this.isDone = true;
                 if (typeof this.onComplete === "function") {
@@ -219,11 +295,15 @@ class Packet {
         if (!pos) return;
 
         context.save();
+        if (this.isDropped) {
+            context.globalAlpha = Math.max(0, this.dropFade);
+        }
+
         // Outer pulsing glow
         context.shadowColor = this.color;
-        context.shadowBlur = 12;
+        context.shadowBlur = this.isDropped ? 18 : 12;
         context.beginPath();
-        context.arc(pos.x, pos.y, 7, 0, Math.PI * 2);
+        context.arc(pos.x, pos.y, this.isDropped ? 8 : 7, 0, Math.PI * 2);
         context.fillStyle = this.color;
         context.fill();
 
@@ -231,67 +311,78 @@ class Packet {
         context.shadowBlur = 0;
         context.beginPath();
         context.arc(pos.x, pos.y, 3.5, 0, Math.PI * 2);
-        context.fillStyle = "#ffffff";
+        context.fillStyle = this.isDropped ? "#fee2e2" : "#ffffff";
         context.fill();
 
         context.restore();
     }
 }
 
-// Active packet manager holding packets in transit and route highlights
+// Active packet manager holding packets in transit and per-packet route highlights
 const packetManager = {
     packets: [],
-    highlightedPath: null, // Array of node IDs representing the active shortest route
-    highlightTimeout: null,
+    isPaused: false, // Global simulation pause state
+    stepRequested: false, // True when user triggers a single tick step
+    speedMultiplier: 1.0, // Global simulation speed factor
 
-    setHighlightedPath(path, durationMs = 0) {
-        this.highlightedPath = path;
-        if (this.highlightTimeout) {
-            clearTimeout(this.highlightTimeout);
-            this.highlightTimeout = null;
-        }
-        if (durationMs > 0) {
-            this.highlightTimeout = setTimeout(() => {
-                this.highlightedPath = null;
-            }, durationMs);
-        }
+    add(packet) {
+        this.packets.push(packet);
     },
 
-    clearHighlight() {
-        if (this.highlightTimeout) {
-            clearTimeout(this.highlightTimeout);
-            this.highlightTimeout = null;
-        }
-        this.highlightedPath = null;
+    setSpeed(multiplier) {
+        this.speedMultiplier = Math.max(0.1, multiplier);
     },
 
-    // Checks whether an edge connects consecutive nodes in the highlighted route
+    // Checks whether an edge connects consecutive nodes in ANY active packet's route
     isEdgeInHighlightedPath(nodeAId, nodeBId) {
-        if (!this.highlightedPath || this.highlightedPath.length < 2) return false;
-        for (let i = 0; i < this.highlightedPath.length - 1; i++) {
-            const u = this.highlightedPath[i];
-            const v = this.highlightedPath[i + 1];
-            if ((u === nodeAId && v === nodeBId) || (u === nodeBId && v === nodeAId)) {
-                return true;
+        for (const p of this.packets) {
+            if (p.isDropped) continue; // Don't highlight for dropped packets
+            for (let i = 0; i < p.path.length - 1; i++) {
+                const u = p.path[i];
+                const v = p.path[i + 1];
+                if ((u === nodeAId && v === nodeBId) || (u === nodeBId && v === nodeAId)) {
+                    return true;
+                }
             }
         }
         return false;
     },
 
-    // Checks whether a node is part of the highlighted route
-    isNodeInHighlightedPath(nodeId) {
-        return !!(this.highlightedPath && this.highlightedPath.includes(nodeId));
+    togglePause() {
+        this.isPaused = !this.isPaused;
+        const playIcon = document.getElementById("icon-play");
+        const pauseIcon = document.getElementById("icon-pause");
+        if (playIcon && pauseIcon) {
+            if (this.isPaused) {
+                playIcon.classList.remove("hide");
+                pauseIcon.classList.add("hide");
+            } else {
+                playIcon.classList.add("hide");
+                pauseIcon.classList.remove("hide");
+            }
+        }
+        return this.isPaused;
     },
 
-    add(packet) {
-        this.packets.push(packet);
+    step() {
+        // If simulation was running, pause it so user is in step mode
+        if (!this.isPaused) {
+            this.togglePause();
+        }
+
+        // Trigger each packet to animate travel to its next hop
+        for (const p of this.packets) {
+            p.stepHop();
+        }
     },
 
     updateAndDraw(context) {
         for (let i = this.packets.length - 1; i >= 0; i--) {
             const p = this.packets[i];
             p.draw(context);
-            if (p.update()) {
+
+            // If not paused, allow continuous flow. If paused, only advance if stepping to next hop.
+            if (p.update(!this.isPaused)) {
                 this.packets.splice(i, 1);
             }
         }
@@ -716,24 +807,35 @@ const inspector = {
                 if (result && result.reachable && result.path && result.path.length >= 2) {
                     pingBtn.textContent = `Sent (Cost: ${result.cost})`;
 
-                    // Highlight the computed shortest path in radiant golden yellow
-                    packetManager.setHighlightedPath(result.path);
-
                     // Instantiate and launch the forward ping packet animation
                     const pingPacket = new Packet(result.path, {
                         payload: "PING",
                         color: "#38bdf8", // Cyan
+                        onDrop: (p, atNodeId) => {
+                            console.warn(`Packet dropped at ${atNodeId} due to link/node failure.`);
+                            pingBtn.textContent = "Packet Dropped!";
+                            setTimeout(() => {
+                                pingBtn.disabled = false;
+                                pingBtn.textContent = originalText;
+                            }, 1800);
+                        },
                         onComplete: () => {
                             // Automatically send a return PONG/ACK packet along reversed path
                             const returnPath = [...result.path].reverse();
                             const pongPacket = new Packet(returnPath, {
                                 payload: "ACK",
                                 color: "#22c55e", // Green
+                                onDrop: (p, atNodeId) => {
+                                    console.warn(`ACK packet dropped at ${atNodeId}.`);
+                                    pingBtn.textContent = "ACK Dropped!";
+                                    setTimeout(() => {
+                                        pingBtn.disabled = false;
+                                        pingBtn.textContent = originalText;
+                                    }, 1800);
+                                },
                                 onComplete: () => {
                                     pingBtn.disabled = false;
                                     pingBtn.textContent = originalText;
-                                    // Fade / clear path highlight after a short period post-delivery
-                                    packetManager.setHighlightedPath(result.path, 500);
                                 }
                             });
                             packetManager.add(pongPacket);
@@ -1196,3 +1298,43 @@ cvs.addEventListener("wheel", (eve) => {
 async function findShortestRoute(srcNode, destNode) {
     return await network.findShortestRoute(srcNode, destNode);
 }
+
+// ==========================================
+// 7. PLAYBACK CONTROLS (PLAY/PAUSE, STEP & SPEED)
+// ==========================================
+const playPauseBtn = document.getElementById("sim-play-pause-btn");
+const stepBtn = document.getElementById("sim-step-btn");
+const speedSlider = document.getElementById("sim-speed-slider");
+const speedLabel = document.getElementById("sim-speed-label");
+
+if (playPauseBtn) {
+    playPauseBtn.addEventListener("click", () => {
+        packetManager.togglePause();
+    });
+}
+
+if (stepBtn) {
+    stepBtn.addEventListener("click", () => {
+        // Step forward one animation tick
+        packetManager.step();
+    });
+}
+
+if (speedSlider) {
+    speedSlider.addEventListener("input", (e) => {
+        const val = parseFloat(e.target.value);
+        packetManager.setSpeed(val);
+        if (speedLabel) {
+            speedLabel.textContent = `${val}x`;
+        }
+    });
+}
+
+// Keyboard shortcuts: Spacebar to toggle Pause/Resume
+window.addEventListener("keydown", (e) => {
+    // Only capture spacebar if not focused inside an input or editable field
+    if (e.code === "Space" && e.target.tagName !== "INPUT" && e.target.tagName !== "SELECT" && e.target.tagName !== "TEXTAREA") {
+        e.preventDefault();
+        packetManager.togglePause();
+    }
+});

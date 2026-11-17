@@ -331,6 +331,75 @@ canvas {
     background: #00000000;
 }
 
+/* Simulation playback controls (Play/Pause and Step) */
+div#sim-controls {
+    position: absolute;
+    top: 7px;
+    right: 55px;
+    background: #0f172a;
+    border: 1px solid #27303d;
+    padding: 3px 5px;
+    border-radius: 0.75rem;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    box-shadow: 1px 2px 9px 0px #152447;
+    z-index: 20;
+}
+
+div#sim-controls>span {
+    padding: 6px;
+    background-color: #1e293b;
+    border: 1px solid #343d4b;
+    border-radius: 7px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    color: #ffffff;
+    transition: background-color 250ms linear, transform 150ms ease-out, color 50ms linear, box-shadow 200ms ease-out;
+}
+
+div#sim-controls>span:hover {
+    background-color: #263750;
+    color: #38bdf8;
+    border-color: #38bdf8;
+}
+
+div#sim-controls>span:active {
+    transform: scale(0.88);
+}
+
+div#sim-controls svg.sim-icon {
+    width: 20px;
+    height: 20px;
+}
+
+div#sim-speed-control {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 0 4px;
+}
+
+input#sim-speed-slider {
+    width: 75px;
+    accent-color: #0284c7;
+    cursor: pointer;
+    height: 4px;
+}
+
+span#sim-speed-label {
+    font-size: 11px;
+    font-weight: 700;
+    color: #94a3b8;
+    width: 30px;
+}
+
+div#sim-controls .hide {
+    display: none !important;
+}
+
 span#help-btn {
     font-weight: 800;
     position: absolute;
