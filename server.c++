@@ -58,10 +58,12 @@ int main()
         std::string dest = body["dest"].s();
 
         // Parse nodes and edges from the stateless payload
-        std::vector<std::string> nodes;
+        std::vector<routing::RawNode> nodes;
         if (body.has("nodes")) {
             for (const auto &nodeItem : body["nodes"]) {
-                nodes.push_back(nodeItem["id"].s());
+                std::string id = std::string(nodeItem["id"].s());
+                std::string type = nodeItem.has("type") ? std::string(nodeItem["type"].s()) : "router";
+                nodes.push_back({id, type});
             }
         }
 

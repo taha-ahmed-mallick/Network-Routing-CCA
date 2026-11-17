@@ -166,6 +166,138 @@ class Edge {
     }
 }
 
+// Packet class to manage packet transit state and hop-by-hop animation
+class Packet {
+    constructor(pathNodeIds, options = {}) {
+        this.path = pathNodeIds; // e.g. ["C1", "R1", "R2", "C2"]
+        this.hopIndex = 0;       // Current starting node index in this.path
+        this.progress = 0.0;     // Progress along current edge: [0.0 -> 1.0]
+        this.speed = options.speed || 0.035; // Speed of movement per animation frame
+        this.color = options.color || "#38bdf8"; // Cyan packet glow
+        this.isDone = false;
+        this.payload = options.payload || "PING";
+        this.onComplete = options.onComplete || null;
+    }
+
+    // Advances the packet along the path; returns true when packet has arrived at destination
+    update() {
+        if (this.isDone || this.path.length < 2) {
+            this.isDone = true;
+            return true;
+        }
+
+        this.progress += this.speed;
+        if (this.progress >= 1.0) {
+            this.progress = 0.0;
+            this.hopIndex++;
+            if (this.hopIndex >= this.path.length - 1) {
+                this.isDone = true;
+                if (typeof this.onComplete === "function") {
+                    this.onComplete(this);
+                }
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // Calculates the current world coordinates of the packet
+    getCurrentPosition() {
+        if (this.path.length < 2) return null;
+        const fromNode = network.getNodeById(this.path[this.hopIndex]);
+        const toNode = network.getNodeById(this.path[this.hopIndex + 1]);
+        if (!fromNode || !toNode) return null;
+
+        const x = fromNode.x + (toNode.x - fromNode.x) * this.progress;
+        const y = fromNode.y + (toNode.y - fromNode.y) * this.progress;
+        return { x, y };
+    }
+
+    // Draws the packet on the canvas (including outer glow and inner core)
+    draw(context) {
+        const pos = this.getCurrentPosition();
+        if (!pos) return;
+
+        context.save();
+        // Outer pulsing glow
+        context.shadowColor = this.color;
+        context.shadowBlur = 12;
+        context.beginPath();
+        context.arc(pos.x, pos.y, 7, 0, Math.PI * 2);
+        context.fillStyle = this.color;
+        context.fill();
+
+        // Bright inner core
+        context.shadowBlur = 0;
+        context.beginPath();
+        context.arc(pos.x, pos.y, 3.5, 0, Math.PI * 2);
+        context.fillStyle = "#ffffff";
+        context.fill();
+
+        context.restore();
+    }
+}
+
+// Active packet manager holding packets in transit and route highlights
+const packetManager = {
+    packets: [],
+    highlightedPath: null, // Array of node IDs representing the active shortest route
+    highlightTimeout: null,
+
+    setHighlightedPath(path, durationMs = 0) {
+        this.highlightedPath = path;
+        if (this.highlightTimeout) {
+            clearTimeout(this.highlightTimeout);
+            this.highlightTimeout = null;
+        }
+        if (durationMs > 0) {
+            this.highlightTimeout = setTimeout(() => {
+                this.highlightedPath = null;
+            }, durationMs);
+        }
+    },
+
+    clearHighlight() {
+        if (this.highlightTimeout) {
+            clearTimeout(this.highlightTimeout);
+            this.highlightTimeout = null;
+        }
+        this.highlightedPath = null;
+    },
+
+    // Checks whether an edge connects consecutive nodes in the highlighted route
+    isEdgeInHighlightedPath(nodeAId, nodeBId) {
+        if (!this.highlightedPath || this.highlightedPath.length < 2) return false;
+        for (let i = 0; i < this.highlightedPath.length - 1; i++) {
+            const u = this.highlightedPath[i];
+            const v = this.highlightedPath[i + 1];
+            if ((u === nodeAId && v === nodeBId) || (u === nodeBId && v === nodeAId)) {
+                return true;
+            }
+        }
+        return false;
+    },
+
+    // Checks whether a node is part of the highlighted route
+    isNodeInHighlightedPath(nodeId) {
+        return !!(this.highlightedPath && this.highlightedPath.includes(nodeId));
+    },
+
+    add(packet) {
+        this.packets.push(packet);
+    },
+
+    updateAndDraw(context) {
+        for (let i = this.packets.length - 1; i >= 0; i--) {
+            const p = this.packets[i];
+            p.draw(context);
+            if (p.update()) {
+                this.packets.splice(i, 1);
+            }
+        }
+    }
+};
+
 // ==========================================
 // 2. CENTRALIZED NETWORK & INTERACTION STATE
 // ==========================================
@@ -274,6 +406,36 @@ const network = {
             nodes: validNodes.map(n => ({ id: n.id, type: n.type })),
             edges: validEdges
         };
+    },
+
+    // Helper to fetch a node object by its ID
+    getNodeById(id) {
+        return this.nodes.find(n => n.id === id) || null;
+    },
+
+    // Queries the C++ Crow backend for the shortest route using Dijkstra
+    async findShortestRoute(srcId, destId) {
+        const payload = this.toRoutingPayload(srcId, destId);
+        try {
+            const response = await fetch("/route", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify(payload)
+            });
+
+            if (!response.ok) {
+                const errorText = await response.text();
+                throw new Error(`HTTP ${response.status}: ${errorText}`);
+            }
+
+            const data = await response.json();
+            return data;
+        } catch (err) {
+            console.error("Routing request failed:", err);
+            return { reachable: false, cost: -1, path: [], error: err.message };
+        }
     },
 
     // ==========================================
@@ -540,15 +702,51 @@ const inspector = {
 
         if (isClient) {
             const pingBtn = body.querySelector("#send-ping-btn");
-            pingBtn.addEventListener("click", () => {
+            pingBtn.addEventListener("click", async () => {
                 const targetId = body.querySelector("#ping-target-select").value;
                 if (!targetId) return;
-                // Routing payload hook will connect here in the next step
-                console.log(`Ping requested: ${node.id} -> ${targetId}`);
-                findShortestRoute(node.id, targetId).then(result => {
-                    console.log("Shortest route:", result);
-                });
-                console.log("A");
+
+                pingBtn.disabled = true;
+                const originalText = pingBtn.textContent;
+                pingBtn.textContent = "Routing...";
+
+                const result = await network.findShortestRoute(node.id, targetId);
+                console.log("Shortest route result:", result);
+
+                if (result && result.reachable && result.path && result.path.length >= 2) {
+                    pingBtn.textContent = `Sent (Cost: ${result.cost})`;
+
+                    // Highlight the computed shortest path in radiant golden yellow
+                    packetManager.setHighlightedPath(result.path);
+
+                    // Instantiate and launch the forward ping packet animation
+                    const pingPacket = new Packet(result.path, {
+                        payload: "PING",
+                        color: "#38bdf8", // Cyan
+                        onComplete: () => {
+                            // Automatically send a return PONG/ACK packet along reversed path
+                            const returnPath = [...result.path].reverse();
+                            const pongPacket = new Packet(returnPath, {
+                                payload: "ACK",
+                                color: "#22c55e", // Green
+                                onComplete: () => {
+                                    pingBtn.disabled = false;
+                                    pingBtn.textContent = originalText;
+                                    // Fade / clear path highlight after a short period post-delivery
+                                    packetManager.setHighlightedPath(result.path, 500);
+                                }
+                            });
+                            packetManager.add(pongPacket);
+                        }
+                    });
+                    packetManager.add(pingPacket);
+                } else {
+                    pingBtn.textContent = "Unreachable";
+                    setTimeout(() => {
+                        pingBtn.disabled = false;
+                        pingBtn.textContent = originalText;
+                    }, 1500);
+                }
             });
         }
     },
@@ -697,6 +895,7 @@ function drawEdges() {
     for (const edge of network.edges) {
         const isSelected = interaction.selectedEdge === edge;
         const isHovered = interaction.hoveredEdge === edge;
+        const isHighlighted = packetManager.isEdgeInHighlightedPath(edge.nodeA.id, edge.nodeB.id);
 
         ctx.save();
         ctx.beginPath();
@@ -706,6 +905,11 @@ function drawEdges() {
         if (edge.broken) {
             ctx.strokeStyle = "#ef4444";
             ctx.setLineDash([6, 6]);
+        } else if (isHighlighted) {
+            // Bright animated highlight for the computed shortest path
+            ctx.strokeStyle = "#eab308"; // Radiant Golden Yellow
+            ctx.shadowColor = "rgba(234, 136, 8, 0.6)";
+            ctx.shadowBlur = 10;
         } else if (isSelected) {
             ctx.strokeStyle = "#38bdf8";
         } else if (isHovered) {
@@ -714,22 +918,23 @@ function drawEdges() {
             ctx.strokeStyle = "#475569";
         }
 
-        ctx.lineWidth = isSelected || isHovered ? 3.5 : 2.5;
+        ctx.lineWidth = isHighlighted ? 4 : (isSelected || isHovered ? 3.5 : 2.5);
         ctx.stroke();
 
         // Weight badge at midpoint
         const midX = (edge.nodeA.x + edge.nodeB.x) / 2;
         const midY = (edge.nodeA.y + edge.nodeB.y) / 2;
         ctx.setLineDash([]);
-        ctx.fillStyle = "#0f172a";
+        ctx.shadowBlur = 0;
+        ctx.fillStyle = isHighlighted ? "#854d0e" : "#0f172a";
         ctx.beginPath();
         ctx.arc(midX, midY, 11, 0, Math.PI * 2);
         ctx.fill();
-        ctx.strokeStyle = edge.broken ? "#ef4444" : "#334155";
+        ctx.strokeStyle = edge.broken ? "#ef4444" : (isHighlighted ? "#eab308" : "#334155");
         ctx.lineWidth = 1.5;
         ctx.stroke();
 
-        ctx.fillStyle = edge.broken ? "#fca5a5" : "#e2e8f0";
+        ctx.fillStyle = edge.broken ? "#fca5a5" : (isHighlighted ? "#fef08a" : "#e2e8f0");
         ctx.font = "bold 11px Roboto, sans-serif";
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
@@ -834,6 +1039,7 @@ function animation(currentTime) {
 
     drawEdges();
     drawNodes();
+    packetManager.updateAndDraw(ctx);
 
     window.requestAnimationFrame(animation);
 }
@@ -986,30 +1192,7 @@ cvs.addEventListener("wheel", (eve) => {
     dots();
 }, { passive: false });
 
+// Global convenience wrapper pointing to network.findShortestRoute
 async function findShortestRoute(srcNode, destNode) {
-    try {
-        const response = await fetch("/route", {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json"
-            },
-            body: JSON.stringify({
-                src: srcNode,
-                dest: destNode
-            })
-        });
-
-        if (!response.ok) {
-            const errorText = await response.text();
-            throw new Error(`HTTP ${response.status}: ${errorText}`);
-        }
-
-        const data = await response.json();
-        console.log("Route response:", data);
-        // data -> { reachable: true, src: "...", dest: "...", cost: 0, path: [...] }
-        return data;
-
-    } catch (err) {
-        console.error("Request failed:", err);
-    }
+    return await network.findShortestRoute(srcNode, destNode);
 }
