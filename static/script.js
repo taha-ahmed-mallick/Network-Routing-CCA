@@ -545,6 +545,10 @@ const inspector = {
                 if (!targetId) return;
                 // Routing payload hook will connect here in the next step
                 console.log(`Ping requested: ${node.id} -> ${targetId}`);
+                findShortestRoute(node.id, targetId).then(result => {
+                    console.log("Shortest route:", result);
+                });
+                console.log("A");
             });
         }
     },
@@ -981,3 +985,31 @@ cvs.addEventListener("wheel", (eve) => {
     dimension.y = mouseY - (mouseY - dimension.y) * factor;
     dots();
 }, { passive: false });
+
+async function findShortestRoute(srcNode, destNode) {
+    try {
+        const response = await fetch("/route", {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify({
+                src: srcNode,
+                dest: destNode
+            })
+        });
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(`HTTP ${response.status}: ${errorText}`);
+        }
+
+        const data = await response.json();
+        console.log("Route response:", data);
+        // data -> { reachable: true, src: "...", dest: "...", cost: 0, path: [...] }
+        return data;
+
+    } catch (err) {
+        console.error("Request failed:", err);
+    }
+}
