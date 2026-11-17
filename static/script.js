@@ -654,8 +654,8 @@ let imgs = {
     server: new Image(),
     broken: new Image()
 };
-imgs.client.src = "./imgs/Client.svg";
-imgs.router.src = "./imgs/Router.svg";
+imgs.client.src = "./imgs/client.svg";
+imgs.router.src = "./imgs/router.svg";
 imgs.server.src = "./imgs/server.svg";
 imgs.broken.src = "./imgs/broken.svg";
 
