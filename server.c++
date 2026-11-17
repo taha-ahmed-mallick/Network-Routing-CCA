@@ -1,4 +1,5 @@
 #include "./include/crow_all.h"
+#include "./include/algorithm.h++"
 #include <fstream>
 #include <sstream>
 #include <string>
@@ -56,17 +57,43 @@ int main()
         std::string src = body["src"].s();
         std::string dest = body["dest"].s();
 
+        // Parse nodes and edges from the stateless payload
+        std::vector<std::string> nodes;
+        if (body.has("nodes")) {
+            for (const auto &nodeItem : body["nodes"]) {
+                nodes.push_back(nodeItem["id"].s());
+            }
+        }
+
+        std::vector<routing::RawEdge> edges;
+        if (body.has("edges")) {
+            for (const auto &edgeItem : body["edges"]) {
+                std::string from = edgeItem["from"].s();
+                std::string to = edgeItem["to"].s();
+                int weight = edgeItem["weight"].i();
+                edges.push_back({from, to, weight});
+            }
+        }
+
+        // Compute shortest route using Dijkstra algorithm
+        routing::RouteResult routeRes = routing::findShortestRoute(src, dest, nodes, edges);
+
         // Build response JSON (Dijkstra will plug in right here!)
         crow::json::wvalue result;
-        result["reachable"] = true;
+        result["reachable"] = routeRes.reachable;
         result["src"] = src;
         result["dest"] = dest;
-        result["cost"] = 0;
-        result["path"] = crow::json::wvalue::list({src, dest});
+        result["cost"] = routeRes.cost;
+        
+        std::vector<crow::json::wvalue> pathList;
+        for (const auto &nodeId : routeRes.path) {
+            pathList.push_back(nodeId);
+        }
+        result["path"] = crow::json::wvalue::list(pathList);
 
         return crow::response(result); });
 
-    // Start multi-threaded HTTP server on port 8080
-    app.port(8080).multithreaded().run();
+    // Start multi-threaded HTTP server on port 8000
+    app.port(8000).multithreaded().run();
     return 0;
 }
