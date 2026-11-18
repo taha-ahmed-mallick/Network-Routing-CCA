@@ -288,6 +288,9 @@ class Packet {
 
             if (this.hopIndex >= this.path.length - 1) {
                 this.isDone = true;
+                // Ensure arriving and departing nodes have no lingering transient queue entries
+                if (fromNode) fromNode.queue = [];
+                if (arrivedNode) arrivedNode.queue = [];
                 if (typeof this.onComplete === "function") {
                     this.onComplete(this);
                 }
@@ -400,6 +403,39 @@ const packetManager = {
         for (const p of this.packets) {
             p.stepHop();
         }
+
+        // Contact C++ backend to advance the authoritative simulation tick
+        network.stepSimulationTick().then(tickResult => {
+            if (tickResult) {
+                // Synchronize router circular FIFO queue badges from C++
+                // Build a lookup map of active queue counts from C++ tick result
+                const activeQueueMap = new Map();
+                if (tickResult.queues && Array.isArray(tickResult.queues)) {
+                    for (const qInfo of tickResult.queues) {
+                        activeQueueMap.set(qInfo.node, qInfo.count);
+                    }
+                }
+
+                // Update every node on canvas: if count > 0 set queue, otherwise cleanly empty it
+                for (const node of network.nodes) {
+                    const count = activeQueueMap.get(node.id) || 0;
+                    node.queue = count > 0 ? Array(count).fill(null) : [];
+                }
+
+                // Synchronize authoritative packet metrics from C++ ActivityLogger
+                if (typeof tickResult.tx === "number") activityLogger.stats.tx = tickResult.tx;
+                if (typeof tickResult.rx === "number") activityLogger.stats.rx = tickResult.rx;
+                if (typeof tickResult.drop === "number") activityLogger.stats.drop = tickResult.drop;
+                activityLogger.updateStatsDisplay();
+
+                // Append any newly recorded logs from C++'s discrete tick
+                if (tickResult.newLogs && Array.isArray(tickResult.newLogs)) {
+                    for (const logItem of tickResult.newLogs) {
+                        activityLogger.renderEntry(logItem);
+                    }
+                }
+            }
+        });
     },
 
     updateAndDraw(context) {
@@ -435,6 +471,8 @@ const traversalManager = {
         for (const n of network.nodes) {
             n.queue = [];
         }
+        // Also flush any pending in-flight packets and router queues in the C++ backend
+        network.clearSimulation();
 
         this.isRunning = true;
         this.type = type.toUpperCase();
@@ -627,6 +665,142 @@ const network = {
 
     markDirty() {
         this.isDirty = true;
+        // Authoritatively synchronize the modified topology with the C++ in-memory Network engine
+        this.syncToBackend();
+    },
+
+    /**
+     * Synchronizes the active network topology (all nodes, entity types, operational status,
+     * edges, weights, and broken flags) to the C++ Crow backend via POST /api/sync.
+     * This ensures the C++ in-memory Network graph stays perfectly synchronized with the canvas.
+     */
+    async syncToBackend() {
+        try {
+            const payload = {
+                nodes: this.nodes.map(node => ({
+                    id: node.id,
+                    type: node.type,
+                    broken: Boolean(node.broken)
+                })),
+                edges: this.edges.map(edge => ({
+                    from: edge.nodeA.id,
+                    to: edge.nodeB.id,
+                    weight: edge.weight,
+                    broken: Boolean(edge.broken)
+                }))
+            };
+
+            const response = await fetch("/api/sync", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify(payload)
+            });
+
+            if (!response.ok) {
+                console.warn("Backend topology sync returned HTTP status:", response.status);
+            }
+        } catch (err) {
+            // Gracefully handle if server is starting up or in standalone preview mode
+            console.debug("Backend topology sync omitted:", err.message);
+        }
+    },
+
+    /**
+     * Injects a new Ping packet into the C++ in-memory simulation engine via POST /api/ping.
+     * The C++ engine computes Dijkstra shortest path, enqueues the packet into the source
+     * router's circular FIFO PacketQueue, and records a PING_TX log in the C++ ActivityLogger.
+     *
+     * @param {string} srcId - ID of the sender client node (e.g. "C1")
+     * @param {string} destId - ID of the target client node (e.g. "C2")
+     * @returns {Promise<object|null>} Response containing success flag, pktId, path, cost, and stats
+     */
+    async injectPing(srcId, destId) {
+        try {
+            const response = await fetch("/api/ping", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify({ src: srcId, dest: destId })
+            });
+
+            if (!response.ok) return null;
+            return await response.json();
+        } catch (err) {
+            console.debug("Backend injectPing call omitted:", err.message);
+            return null;
+        }
+    },
+
+    /**
+     * Advances the C++ simulation engine by one discrete simulation tick via POST /api/sim/tick.
+     * Resolves link contention across busy edges, advances in-flight packets, drops packets
+     * on broken links/nodes, and automatically spawns return ACK replies on destination arrival.
+     *
+     * @returns {Promise<object|null>} Snapshot of active packets, router queue depths, new logs, and stats
+     */
+    async stepSimulationTick() {
+        try {
+            const response = await fetch("/api/sim/tick", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json"
+                }
+            });
+
+            if (!response.ok) return null;
+            return await response.json();
+        } catch (err) {
+            console.debug("Backend stepSimulationTick call omitted:", err.message);
+            return null;
+        }
+    },
+
+    /**
+     * Clears all active in-flight packets and flushes per-router circular FIFO queues in C++
+     * via POST /api/sim/clear.
+     */
+    async clearSimulation() {
+        try {
+            await fetch("/api/sim/clear", {
+                method: "POST"
+            });
+        } catch (err) {
+            console.debug("Backend clearSimulation call omitted:", err.message);
+        }
+    },
+
+    /**
+     * Forwards a frontend lifecycle or topology event directly to the C++ ActivityLogger
+     * via POST /api/log, appending it to activity_log.txt on disk and updating C++ metrics.
+     *
+     * @param {string} type - Event category tag (e.g. "NODE_ADD", "LINK_STATE", "PING_TX")
+     * @param {string} message - Descriptive event details
+     */
+    async logEventToBackend(type, message) {
+        try {
+            const response = await fetch("/api/log", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify({ type, message })
+            });
+            if (response.ok) {
+                const data = await response.json();
+                if (data) {
+                    // Synchronize authoritative counters from C++ ActivityLogger
+                    if (typeof data.tx === "number") activityLogger.stats.tx = data.tx;
+                    if (typeof data.rx === "number") activityLogger.stats.rx = data.rx;
+                    if (typeof data.drop === "number") activityLogger.stats.drop = data.drop;
+                    activityLogger.updateStatsDisplay();
+                }
+            }
+        } catch (err) {
+            console.debug("Backend logEventToBackend call omitted:", err.message);
+        }
     },
 
     addClient(x, y) {
@@ -698,17 +872,10 @@ const network = {
         if (typeof updateTraversalDropdown === "function") updateTraversalDropdown();
     },
 
-    // Generates the stripped-down JSON payload for the C++ Crow backend
+    // Generates the graph topology payload for C++ Dijkstra routing
     toRoutingPayload(srcId, destId) {
-        const validNodes = this.nodes.filter(n => {
-            if (n.broken) return false;
-            // Strip out all clients except the query's source and destination
-            if (n.type === "client" && n.id !== srcId && n.id !== destId) {
-                return false;
-            }
-            return true;
-        });
-
+        // Pass all non-broken nodes; C++ Dijkstra natively enforces that clients cannot act as transit hops
+        const validNodes = this.nodes.filter(n => !n.broken);
         const validIds = new Set(validNodes.map(n => n.id));
 
         const validEdges = this.edges
@@ -734,6 +901,9 @@ const network = {
 
     // Queries the C++ Crow backend for the shortest route using Dijkstra
     async findShortestRoute(srcId, destId) {
+        // Ensure the C++ authoritative Network has the latest canvas state prior to Dijkstra calculation
+        await this.syncToBackend();
+
         const payload = this.toRoutingPayload(srcId, destId);
         try {
             const response = await fetch("/route", {
@@ -780,6 +950,9 @@ const network = {
 
     // Queries the C++ Crow backend for BFS or DFS traversal
     async findTraversal(startId, type) {
+        // Ensure the C++ authoritative Network has the latest canvas state prior to traversal calculation
+        await this.syncToBackend();
+
         const payload = this.toTraversalPayload(startId, type);
         try {
             const response = await fetch("/traverse", {
@@ -919,6 +1092,9 @@ const network = {
 
         this.isDirty = false; // Reset dirty flag after successful import
         if (typeof updateTraversalDropdown === "function") updateTraversalDropdown();
+
+        // Immediately synchronize newly imported topology to the C++ backend
+        this.syncToBackend();
     }
 };
 
@@ -1073,6 +1249,8 @@ const inspector = {
         body.querySelector("#toggle-node-broken").addEventListener("click", () => {
             node.broken = !node.broken;
             this.openNode(node);
+            // Authoritatively synchronize updated offline/online node state with C++ engine
+            network.markDirty();
             activityLogger.log("NODE_STATE", `${node.type === "client" ? "Client" : "Router"} ${node.label} ${node.broken ? "DISABLED" : "ENABLED"}.`);
             if (typeof updateTraversalDropdown === "function") updateTraversalDropdown();
         });
@@ -1108,6 +1286,14 @@ const inspector = {
                     activityLogger.log("ROUTE_FOUND", `Shortest route: ${pathStr} (Cost: ${result.cost}).`);
                     activityLogger.log("PING_TX", `Packet departing ${node.label} towards ${targetLabel}.`);
 
+                    // Authoritatively inject the ping packet into C++ Network simulation engine via POST /api/ping
+                    network.injectPing(node.id, targetId).then(pingRes => {
+                        if (pingRes && typeof pingRes.tx === "number") {
+                            activityLogger.stats.tx = pingRes.tx;
+                            activityLogger.updateStatsDisplay();
+                        }
+                    });
+
                     // Instantiate and launch the forward ping packet animation
                     const pingPacket = new Packet(result.path, {
                         payload: "PING",
@@ -1124,6 +1310,8 @@ const inspector = {
                             }, 1800);
                         },
                         onComplete: () => {
+                            const destNode = network.getNodeById(targetId);
+                            if (destNode) destNode.queue = [];
                             activityLogger.log("PING_RX", `Ping delivered at ${targetLabel}. Generating ACK packet...`);
                             activityLogger.log("PING_TX", `ACK reply departing ${targetLabel} towards ${node.label}.`);
                             // Automatically send a return PONG/ACK packet along reversed path
@@ -1143,6 +1331,7 @@ const inspector = {
                                     }, 1800);
                                 },
                                 onComplete: () => {
+                                    node.queue = [];
                                     activityLogger.log("PING_RX", `ACK received at ${node.label}. Round-trip successful!`);
                                     pingBtn.disabled = false;
                                     pingBtn.textContent = originalText;
@@ -1217,6 +1406,8 @@ const inspector = {
         body.querySelector("#toggle-edge-broken").addEventListener("click", () => {
             edge.broken = !edge.broken;
             this.openEdge(edge);
+            // Authoritatively synchronize updated link broken/active state with C++ engine
+            network.markDirty();
             activityLogger.log("LINK_STATE", `Link ${edge.id} (${edge.nodeA.label} <-> ${edge.nodeB.label}) ${edge.broken ? "DISABLED" : "ENABLED"}.`);
         });
     }
@@ -1753,6 +1944,9 @@ const activityLogger = {
     init() {
         if (!this.panel) return;
 
+        // Fetch any existing activity logs and metrics from C++ backend on startup
+        this.fetchBackendLogs();
+
         // Clear button
         if (this.clearBtn) {
             this.clearBtn.addEventListener("click", () => this.clear());
@@ -1808,6 +2002,25 @@ const activityLogger = {
         }
     },
 
+    async fetchBackendLogs() {
+        try {
+            const response = await fetch("/api/logs");
+            if (response.ok) {
+                const data = await response.json();
+                if (typeof data.tx === "number") this.stats.tx = data.tx;
+                if (typeof data.rx === "number") this.stats.rx = data.rx;
+                if (typeof data.drop === "number") this.stats.drop = data.drop;
+                if (Array.isArray(data.logs) && data.logs.length > 0 && this.logs.length === 0) {
+                    for (const logItem of data.logs) {
+                        this.logs.push(logItem);
+                        this.renderEntry(logItem);
+                    }
+                }
+                this.updateStatsDisplay();
+            }
+        } catch (_) {}
+    },
+
     log(type, message) {
         const now = new Date();
         const timeStr = now.toTimeString().split(" ")[0]; // "HH:MM:SS"
@@ -1821,6 +2034,9 @@ const activityLogger = {
 
         this.updateStatsDisplay();
         this.renderEntry(entry);
+
+        // Authoritatively mirror and persist event to C++ ActivityLogger and activity_log.txt on disk
+        network.logEventToBackend(type, message);
     },
 
     renderEntry(entry) {
@@ -1868,6 +2084,9 @@ const activityLogger = {
         if (this.body) {
             this.body.innerHTML = `<div class="logger-empty">No activity recorded yet.</div>`;
         }
+
+        // Authoritatively reset the ActivityLogger in memory on the C++ backend
+        fetch("/api/logs/clear", { method: "POST" }).catch(() => {});
     },
 
     exportData() {
