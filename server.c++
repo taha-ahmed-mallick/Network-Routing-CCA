@@ -234,8 +234,10 @@ int main()
             }
             res["path"] = crow::json::wvalue::list(pathList);
 
-            // Log ping departure in C++ ActivityLogger and persistent activity_log.txt
-            net.getLogger().log("PING_TX", "Packet #" + std::to_string(outPkt.id) +
+            // Log ping injection in C++ ActivityLogger and persistent activity_log.txt.
+            // Uses PING_INJECT (not PING_TX) because the browser already logs the
+            // PING_TX for this packet; logging it twice would double-count TX.
+            net.getLogger().log("PING_INJECT", "Packet #" + std::to_string(outPkt.id) +
                                            " departing " + src + " towards " + dest + ".");
         } else {
             // Log drop event if destination unreachable or device broken

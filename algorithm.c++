@@ -680,6 +680,9 @@ namespace routing {
     }
 
     SimulationTickResult Network::stepTick() {
+        // The browser already logs and counts PING_TX / PING_RX / DROP for every packet it
+        // animates, so tick events are logged as SIM_* types: they are kept in the log but
+        // do not change the TX/RX/DROP counters (prevents double counting in Step mode).
         ++tickCount;
         SimulationTickResult result;
         result.tick = tickCount;
@@ -718,7 +721,7 @@ namespace routing {
                 pkt.isDropped = true;
                 pkt.dropNode = fromId;
                 pkt.dropReason = "link/device offline";
-                logger.log("DROP", (pkt.kind == "PING" ? "Ping packet dropped at " : "ACK reply dropped at ") +
+                logger.log("SIM_DROP", (pkt.kind == "PING" ? "Ping packet dropped at " : "ACK reply dropped at ") +
                                    fromId + " (link/device offline).");
                 continue;
             }
@@ -749,7 +752,7 @@ namespace routing {
                 pkt.isDropped = true;
                 pkt.dropNode = arrivedId;
                 pkt.dropReason = "destination device offline";
-                logger.log("DROP", (pkt.kind == "PING" ? "Ping packet dropped at " : "ACK reply dropped at ") +
+                logger.log("SIM_DROP", (pkt.kind == "PING" ? "Ping packet dropped at " : "ACK reply dropped at ") +
                                    arrivedId + " (device offline).");
                 continue;
             }
@@ -763,8 +766,8 @@ namespace routing {
             // Reached destination endpoint!
             pkt.isDone = true;
             if (pkt.kind == "PING") {
-                logger.log("PING_RX", "Ping delivered at " + arrivedId + ". Generating ACK packet...");
-                logger.log("PING_TX", "ACK reply departing " + arrivedId + " towards " + pkt.pingSrc + ".");
+                logger.log("SIM_PING_RX", "Ping delivered at " + arrivedId + ". Generating ACK packet...");
+                logger.log("SIM_PING_TX", "ACK reply departing " + arrivedId + " towards " + pkt.pingSrc + ".");
 
                 // Spawn return ACK packet
                 std::vector<std::string> returnPath = pkt.path;
@@ -773,7 +776,7 @@ namespace routing {
                 spawned.push_back(ack);
                 nodes[arrivedIdx].queue.enqueue(ack);
             } else {
-                logger.log("PING_RX", "ACK received at " + arrivedId + ". Round-trip successful!");
+                logger.log("SIM_PING_RX", "ACK received at " + arrivedId + ". Round-trip successful!");
             }
         }
 
@@ -822,7 +825,8 @@ namespace routing {
             adjacency[i].clear();
         }
         registry.clear();
-        logger.clear();
+        // Keep the ActivityLogger: a topology sync must not wipe the log or the
+        // TX/RX/DROP counters. Logs are cleared only through POST /api/logs/clear.
         tickCount = 0;
         nextPacketId = 1;
     }
